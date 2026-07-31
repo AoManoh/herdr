@@ -48,12 +48,14 @@ pub(crate) fn settings_section_label(
     use crate::app::state::SettingsSection;
 
     match (language, section) {
+        (UiLanguage::En, SettingsSection::Language) => "language",
         (UiLanguage::En, SettingsSection::Theme) => "theme",
         (UiLanguage::En, SettingsSection::Sound) => "sound",
         (UiLanguage::En, SettingsSection::Toast) => "toasts",
-        (UiLanguage::En, SettingsSection::PaneLabels) => "pane labels",
+        (UiLanguage::En, SettingsSection::PaneLabels) => "labels",
         (UiLanguage::En, SettingsSection::Experiments) => "experiments",
-        (UiLanguage::En, SettingsSection::Integrations) => "integrations",
+        (UiLanguage::En, SettingsSection::Integrations) => "agents",
+        (UiLanguage::ZhCn, SettingsSection::Language) => "语言",
         (UiLanguage::ZhCn, SettingsSection::Theme) => "主题",
         (UiLanguage::ZhCn, SettingsSection::Sound) => "声音",
         (UiLanguage::ZhCn, SettingsSection::Toast) => "通知",
@@ -750,6 +752,10 @@ pub(crate) fn help_text(language: UiLanguage) -> &'static HelpText {
 
 pub(crate) struct SettingsText {
     pub title: &'static str,
+    pub language_title: &'static str,
+    pub language_description: &'static str,
+    pub english: &'static str,
+    pub simplified_chinese: &'static str,
     pub sound_alerts: &'static str,
     pub sound_description: &'static str,
     pub notification_popups: &'static str,
@@ -777,6 +783,10 @@ pub(crate) struct SettingsText {
 
 const SETTINGS_EN: SettingsText = SettingsText {
     title: " settings",
+    language_title: "display language",
+    language_description: "choose the language used by Herdr's built-in interface",
+    english: "English",
+    simplified_chinese: "简体中文",
     sound_alerts: "sound alerts",
     sound_description: "play sounds when agents change state in background",
     notification_popups: "notification popups",
@@ -805,6 +815,10 @@ const SETTINGS_EN: SettingsText = SettingsText {
 
 const SETTINGS_ZH_CN: SettingsText = SettingsText {
     title: " 设置",
+    language_title: "显示语言",
+    language_description: "选择 Herdr 内置界面使用的语言",
+    english: "English",
+    simplified_chinese: "简体中文",
     sound_alerts: "声音提醒",
     sound_description: "后台智能体状态变化时播放提示音",
     notification_popups: "弹出通知",

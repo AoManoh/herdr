@@ -989,6 +989,7 @@ pub enum AgentPanelSort {
 /// Which section of the settings panel is focused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsSection {
+    Language,
     Theme,
     Sound,
     Toast,
@@ -999,6 +1000,7 @@ pub enum SettingsSection {
 
 impl SettingsSection {
     pub const ALL: &[Self] = &[
+        Self::Language,
         Self::Theme,
         Self::Sound,
         Self::Toast,
@@ -1128,6 +1130,8 @@ pub struct SettingsState {
     pub original_palette: Option<Palette>,
     /// The theme name before opening settings.
     pub original_theme: Option<String>,
+    /// The display language before opening settings.
+    pub original_language: Option<crate::config::UiLanguage>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1952,6 +1956,7 @@ impl AppState {
                 list: SelectionListState::new(0),
                 original_palette: None,
                 original_theme: None,
+                original_language: None,
             },
             integration_recommendations: Vec::new(),
             agent_manifest_summaries: Vec::new(),

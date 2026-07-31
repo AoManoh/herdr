@@ -107,6 +107,22 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
     let content_area = stack.content;
 
     match app.settings.section {
+        SettingsSection::Language => {
+            render_modal_choice_list(
+                frame,
+                content_area,
+                t.language_title,
+                t.language_description,
+                &[
+                    (t.english, crate::config::UiLanguage::En),
+                    (t.simplified_chinese, crate::config::UiLanguage::ZhCn),
+                ],
+                app.ui_language,
+                app.settings.list.selected,
+                p,
+                1,
+            );
+        }
         SettingsSection::Theme => {
             render_settings_theme(app, frame, content_area);
         }
@@ -467,6 +483,49 @@ mod tests {
     use super::*;
     use crate::app::{state::SettingsSection, Mode};
     use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn english_settings_tabs_fit_popup_width() {
+        let labels_width = SettingsSection::ALL
+            .iter()
+            .map(|section| {
+                crate::ui::text::display_width(section.label(crate::config::UiLanguage::En)) + 2
+            })
+            .sum::<usize>();
+        let dividers = SettingsSection::ALL.len().saturating_sub(1);
+
+        let integration_badge_width = 2;
+        assert!(
+            labels_width + dividers + integration_badge_width
+                <= (SETTINGS_POPUP_WIDTH - 2) as usize
+        );
+    }
+
+    #[test]
+    fn language_section_renders_both_language_choices() {
+        let mut app = AppState::test_new();
+        app.ui_language = crate::config::UiLanguage::ZhCn;
+        app.settings.section = SettingsSection::Language;
+        app.settings.list.selected = 1;
+        app.mode = Mode::Settings;
+
+        let mut terminal =
+            Terminal::new(TestBackend::new(80, 24)).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_settings_overlay(&app, frame, Rect::new(0, 0, 80, 24)))
+            .expect("settings overlay should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("English"), "rendered: {rendered:?}");
+        assert!(rendered.contains("简 体 中 文"), "rendered: {rendered:?}");
+    }
 
     #[test]
     fn settings_overlay_renders_simplified_chinese() {

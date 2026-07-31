@@ -551,7 +551,7 @@
           "key": "ui.language",
           "type": "enum",
           "default": "\"en\"",
-          "description": "TUI display language. The server language applies to every attached app client.",
+          "description": "TUI display language. Can also be changed from Settings > Language; the server language applies to every attached app client.",
           "values": [
             "en",
             "zh-cn"

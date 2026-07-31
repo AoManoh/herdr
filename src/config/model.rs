@@ -132,6 +132,15 @@ pub enum UiLanguage {
     ZhCn,
 }
 
+impl UiLanguage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::ZhCn => "zh-cn",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RightClickPassthroughModifierConfig(Option<KeyModifiers>);
 

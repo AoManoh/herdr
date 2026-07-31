@@ -336,6 +336,7 @@ impl App {
                         self.begin_tui_workspace_create("tui.mouse.workspace.create")
                     }
                     MouseAction::Settings(action) => match action {
+                        SettingsAction::SaveLanguage(language) => self.save_language(language),
                         SettingsAction::SaveTheme(name) => self.save_theme(&name),
                         SettingsAction::SaveSound(enabled) => self.save_sound(enabled),
                         SettingsAction::SaveToastDelivery(delivery) => {

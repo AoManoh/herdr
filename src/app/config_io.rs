@@ -41,6 +41,19 @@ impl App {
         });
     }
 
+    pub(super) fn save_language(&mut self, language: crate::config::UiLanguage) {
+        if self.update_config_file("display language", |content| {
+            crate::config::upsert_section_value(
+                content,
+                "ui",
+                "language",
+                &format!("\"{}\"", language.as_str()),
+            )
+        }) {
+            self.apply_config_from_disk(false);
+        }
+    }
+
     pub(super) fn save_theme(&mut self, name: &str) {
         if self.update_config_file("theme", |content| {
             let content = crate::config::upsert_section_value(

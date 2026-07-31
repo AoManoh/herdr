@@ -13,6 +13,7 @@ use crate::{
 // The shared `Save` verb is semantic: these actions persist settings.
 #[allow(clippy::enum_variant_names)]
 pub(super) enum SettingsAction {
+    SaveLanguage(crate::config::UiLanguage),
     SaveTheme(String),
     SaveSound(bool),
     SaveToastDelivery(ToastDelivery),
@@ -41,6 +42,7 @@ impl App {
         let previous_section = self.state.settings.section;
         if let Some(action) = update_settings_state(&mut self.state, key) {
             match action {
+                SettingsAction::SaveLanguage(language) => self.save_language(language),
                 SettingsAction::SaveTheme(name) => self.save_theme(&name),
                 SettingsAction::SaveSound(enabled) => self.save_sound(enabled),
                 SettingsAction::SaveToastDelivery(delivery) => self.save_toast_delivery(delivery),
@@ -96,6 +98,25 @@ fn toast_delivery_for_index(idx: usize) -> ToastDelivery {
     }
 }
 
+fn language_index(language: crate::config::UiLanguage) -> usize {
+    match language {
+        crate::config::UiLanguage::En => 0,
+        crate::config::UiLanguage::ZhCn => 1,
+    }
+}
+
+fn language_for_index(idx: usize) -> crate::config::UiLanguage {
+    if idx == 0 {
+        crate::config::UiLanguage::En
+    } else {
+        crate::config::UiLanguage::ZhCn
+    }
+}
+
+fn preview_selected_language(state: &mut AppState) {
+    state.ui_language = language_for_index(state.settings.list.selected);
+}
+
 fn preview_selected_theme(state: &mut AppState) {
     use crate::app::state::Palette;
 
@@ -112,13 +133,24 @@ fn preview_selected_theme(state: &mut AppState) {
     }
 }
 
-fn cancel_settings(state: &mut AppState) {
+fn restore_theme_preview(state: &mut AppState) {
     if let Some(palette) = state.settings.original_palette.take() {
         state.palette = palette;
     }
     if let Some(theme_name) = state.settings.original_theme.take() {
         state.theme_name = theme_name;
     }
+}
+
+fn restore_language_preview(state: &mut AppState) {
+    if let Some(language) = state.settings.original_language.take() {
+        state.ui_language = language;
+    }
+}
+
+fn cancel_settings(state: &mut AppState) {
+    restore_theme_preview(state);
+    restore_language_preview(state);
     super::modal::leave_modal(state);
 }
 
@@ -131,10 +163,18 @@ fn integrations_need_install(state: &AppState) -> bool {
 
 fn apply_settings(state: &mut AppState) -> Option<SettingsAction> {
     match state.settings.section {
+        SettingsSection::Language => {
+            let language = state.ui_language;
+            state.settings.original_language = None;
+            restore_theme_preview(state);
+            super::modal::leave_modal(state);
+            Some(SettingsAction::SaveLanguage(language))
+        }
         SettingsSection::Theme => {
             let theme_name = state.theme_name.clone();
             state.settings.original_palette = None;
             state.settings.original_theme = None;
+            restore_language_preview(state);
             super::modal::leave_modal(state);
             Some(SettingsAction::SaveTheme(theme_name))
         }
@@ -143,6 +183,8 @@ fn apply_settings(state: &mut AppState) -> Option<SettingsAction> {
         }
         SettingsSection::Integrations => None,
         _ => {
+            restore_theme_preview(state);
+            restore_language_preview(state);
             super::modal::leave_modal(state);
             None
         }
@@ -151,6 +193,35 @@ fn apply_settings(state: &mut AppState) -> Option<SettingsAction> {
 
 pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Option<SettingsAction> {
     match state.settings.section {
+        SettingsSection::Language => match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                let previous = state.settings.list.selected;
+                state.settings.list.move_prev();
+                if state.settings.list.selected != previous {
+                    preview_selected_language(state);
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let previous = state.settings.list.selected;
+                state.settings.list.move_next(2);
+                if state.settings.list.selected != previous {
+                    preview_selected_language(state);
+                }
+            }
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                state.settings.section = SettingsSection::Theme;
+                state.settings.list.selected = current_theme_index(&state.theme_name);
+            }
+            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+                state.settings.section = SettingsSection::Experiments;
+                state.settings.list.selected = 0;
+            }
+            _ => match super::modal::modal_action_from_key(&key, super::modal::SETTINGS_ACTIONS) {
+                Some(super::modal::ModalAction::Apply) => return apply_settings(state),
+                Some(super::modal::ModalAction::Close) => cancel_settings(state),
+                _ => {}
+            },
+        },
         SettingsSection::Theme => match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
                 let previous = state.settings.list.selected;
@@ -171,8 +242,8 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 state.settings.list.selected = usize::from(!state.sound_enabled());
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                state.settings.section = SettingsSection::Experiments;
-                state.settings.list.selected = 0;
+                state.settings.section = SettingsSection::Language;
+                state.settings.list.selected = language_index(state.ui_language);
             }
             _ => match super::modal::modal_action_from_key(&key, super::modal::SETTINGS_ACTIONS) {
                 Some(super::modal::ModalAction::Apply) => return apply_settings(state),
@@ -264,8 +335,8 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 state.settings.list.selected = 0;
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                state.settings.section = SettingsSection::Theme;
-                state.settings.list.selected = current_theme_index(&state.theme_name);
+                state.settings.section = SettingsSection::Language;
+                state.settings.list.selected = language_index(state.ui_language);
             }
             _ => {
                 if let Some(super::modal::ModalAction::Close) =
@@ -306,8 +377,10 @@ pub(crate) fn open_settings_at(state: &mut AppState, section: SettingsSection) {
     state.integration_install_messages.clear();
     state.settings.original_palette = Some(state.palette.clone());
     state.settings.original_theme = Some(state.theme_name.clone());
+    state.settings.original_language = Some(state.ui_language);
     state.settings.section = section;
     state.settings.list.selected = match section {
+        SettingsSection::Language => language_index(state.ui_language),
         SettingsSection::Theme => current_theme_index(&state.theme_name),
         SettingsSection::Sound => usize::from(!state.sound_enabled()),
         SettingsSection::Toast => toast_delivery_index(state.toast_delivery()),
@@ -375,6 +448,14 @@ impl AppState {
         }
 
         match self.settings.section {
+            SettingsSection::Language => {
+                let list_y = area.y + 3;
+                if row >= list_y && row < list_y + 2 {
+                    Some((row - list_y) as usize)
+                } else {
+                    None
+                }
+            }
             SettingsSection::Theme => {
                 let max_visible = area.height as usize;
                 let scroll = if self.settings.list.selected >= max_visible {
@@ -427,6 +508,7 @@ impl AppState {
                 if let Some(section) = self.settings_tab_at(mouse.column, mouse.row) {
                     self.settings.section = section;
                     self.settings.list.select(match section {
+                        SettingsSection::Language => language_index(self.ui_language),
                         SettingsSection::Theme => current_theme_index(&self.theme_name),
                         SettingsSection::Sound => usize::from(!self.sound_enabled()),
                         SettingsSection::Toast => toast_delivery_index(self.toast_delivery()),
@@ -441,6 +523,10 @@ impl AppState {
                 if let Some(idx) = self.settings_list_index_at(mouse.column, mouse.row) {
                     self.settings.list.select(idx);
                     return match self.settings.section {
+                        SettingsSection::Language => {
+                            preview_selected_language(self);
+                            None
+                        }
                         SettingsSection::Theme => {
                             preview_selected_theme(self);
                             None
@@ -532,6 +618,52 @@ mod tests {
     }
 
     #[test]
+    fn settings_language_preview_and_cancel_restores_original() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.ui_language = crate::config::UiLanguage::En;
+        open_settings_at(&mut state, SettingsSection::Language);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+        );
+        assert_eq!(state.ui_language, crate::config::UiLanguage::ZhCn);
+        assert_eq!(state.mode, Mode::Settings);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+        assert_eq!(state.ui_language, crate::config::UiLanguage::En);
+        assert_eq!(state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn settings_language_apply_returns_save_action() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.ui_language = crate::config::UiLanguage::En;
+        open_settings_at(&mut state, SettingsSection::Language);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+        );
+        let action = update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+        );
+
+        assert_eq!(
+            action,
+            Some(SettingsAction::SaveLanguage(
+                crate::config::UiLanguage::ZhCn
+            ))
+        );
+        assert_eq!(state.ui_language, crate::config::UiLanguage::ZhCn);
+        assert_eq!(state.mode, Mode::Terminal);
+    }
+
+    #[test]
     fn settings_sound_toggle_returns_save_action() {
         let mut state = state_with_workspaces(&["test"]);
         open_settings(&mut state);
@@ -608,7 +740,19 @@ mod tests {
             &mut state,
             KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
         );
+        assert_eq!(state.settings.section, SettingsSection::Language);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
+        );
         assert_eq!(state.settings.section, SettingsSection::Theme);
+
+        update_settings_state(
+            &mut state,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::empty()),
+        );
+        assert_eq!(state.settings.section, SettingsSection::Language);
 
         update_settings_state(
             &mut state,
@@ -657,6 +801,44 @@ mod tests {
         app.handle_mouse(mouse(MouseEventKind::Moved, area.x + 2, area.y + 2));
 
         assert_eq!(app.state.settings.list.selected, 0);
+    }
+
+    #[test]
+    fn settings_mouse_click_previews_language_and_apply_returns_save_action() {
+        let mut app = app_for_mouse_test();
+        app.state.ui_language = crate::config::UiLanguage::En;
+        open_settings_at(&mut app.state, SettingsSection::Language);
+
+        let area = app.state.settings_content_rect();
+        let preview_action = app.state.handle_settings_mouse(mouse(
+            MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            area.x + 2,
+            area.y + 4,
+        ));
+        assert_eq!(preview_action, None);
+        assert_eq!(app.state.ui_language, crate::config::UiLanguage::ZhCn);
+
+        let inner = app.state.settings_inner_rect();
+        let (apply, _) = crate::ui::settings_button_rects(
+            inner,
+            app.state.ui_language,
+            SettingsSection::Language,
+            true,
+        );
+        let apply = apply.expect("language settings should show apply");
+        let save_action = app.state.handle_settings_mouse(mouse(
+            MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            apply.x,
+            apply.y,
+        ));
+
+        assert_eq!(
+            save_action,
+            Some(SettingsAction::SaveLanguage(
+                crate::config::UiLanguage::ZhCn
+            ))
+        );
+        assert_ne!(app.state.mode, Mode::Settings);
     }
 
     #[test]
