@@ -194,12 +194,8 @@ fn toast_agent_label(agent_label: &str) -> &str {
     agent_label
 }
 
-fn toast_event_text(kind: ToastKind) -> &'static str {
-    match kind {
-        ToastKind::NeedsAttention => "needs attention",
-        ToastKind::Finished => "finished",
-        ToastKind::UpdateInstalled => "updated",
-    }
+fn toast_event_text(language: crate::config::UiLanguage, kind: ToastKind) -> &'static str {
+    crate::i18n::toast_event_text(language, kind)
 }
 
 fn sound_for_toast_kind(
@@ -387,7 +383,7 @@ impl AppState {
         let mut rows = Vec::new();
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
             let workspace_label = ws.display_name_from(&self.terminals, terminal_runtimes);
-            let activity = workspace_activity_summary(ws, &self.terminals);
+            let activity = workspace_activity_summary(self.ui_language, ws, &self.terminals);
             let workspace_search_text = format!("{workspace_label} {activity}").to_lowercase();
             let workspace_matches = match query_kind {
                 NavigatorQueryKind::Empty => true,
@@ -491,12 +487,13 @@ impl AppState {
             .tab_display_name(tab_idx)
             .unwrap_or_else(|| (tab_idx + 1).to_string());
         let (status, seen) = tab_aggregate_state(tab, &self.terminals);
-        let activity = tab_activity_summary(tab, &self.terminals);
+        let activity = tab_activity_summary(self.ui_language, tab, &self.terminals);
         let pane_count = tab.panes.len();
+        let pane_total = crate::i18n::pane_total(self.ui_language, pane_count);
         let meta = if activity.is_empty() {
-            format!("{pane_count} panes")
+            pane_total
         } else {
-            format!("{pane_count} panes · {activity}")
+            format!("{pane_total} · {activity}")
         };
         let search_text = format!("{label} {meta}").to_lowercase();
         NavigatorRow {
@@ -550,7 +547,12 @@ impl AppState {
                 .or_else(|| {
                     launch_label(terminal.and_then(|terminal| terminal.launch_argv.as_ref()))
                 })
-                .unwrap_or_else(|| format!("pane {pane_number}"));
+                .unwrap_or_else(|| {
+                    format!(
+                        "{} {pane_number}",
+                        crate::i18n::navigator_text(self.ui_language).pane
+                    )
+                });
             let display_agent = terminal.and_then(|terminal| terminal.effective_display_agent());
             let agent_label = display_agent.as_deref().or_else(|| {
                 terminal
@@ -563,12 +565,17 @@ impl AppState {
             let status_label = terminal
                 .map(|terminal| terminal.effective_presentation().state_labels)
                 .and_then(|labels| labels.get(state_label_text(state, pane.seen)).cloned());
-            let status = status_label
-                .or_else(|| agent_label.map(|_| state_label_text(state, pane.seen).to_string()));
+            let status = status_label.or_else(|| {
+                agent_label.map(|_| {
+                    crate::i18n::agent_state_label(self.ui_language, state, pane.seen).to_string()
+                })
+            });
             let meta = match (agent_label, status.as_deref()) {
                 (Some(agent_label), Some(status)) => format!("{agent_label} · {status}"),
                 (Some(agent_label), None) => agent_label.to_string(),
-                (None, _) => "shell".to_string(),
+                (None, _) => crate::i18n::navigator_text(self.ui_language)
+                    .shell
+                    .to_string(),
             };
             let is_current = self.is_active_pane(ws_idx, tab_idx, pane_id);
             let search_text = format!("{label} {meta}").to_lowercase();
@@ -925,26 +932,33 @@ fn state_priority(state: AgentState, seen: bool) -> u8 {
 }
 
 fn tab_activity_summary(
+    language: crate::config::UiLanguage,
     tab: &crate::workspace::Tab,
     terminals: &std::collections::HashMap<
         crate::terminal::TerminalId,
         crate::terminal::TerminalState,
     >,
 ) -> String {
-    activity_summary_for_panes(tab.panes.values(), terminals)
+    activity_summary_for_panes(language, tab.panes.values(), terminals)
 }
 
 fn workspace_activity_summary(
+    language: crate::config::UiLanguage,
     ws: &crate::workspace::Workspace,
     terminals: &std::collections::HashMap<
         crate::terminal::TerminalId,
         crate::terminal::TerminalState,
     >,
 ) -> String {
-    activity_summary_for_panes(ws.tabs.iter().flat_map(|tab| tab.panes.values()), terminals)
+    activity_summary_for_panes(
+        language,
+        ws.tabs.iter().flat_map(|tab| tab.panes.values()),
+        terminals,
+    )
 }
 
 fn activity_summary_for_panes<'a>(
+    language: crate::config::UiLanguage,
     panes: impl Iterator<Item = &'a crate::pane::PaneState>,
     terminals: &std::collections::HashMap<
         crate::terminal::TerminalId,
@@ -968,13 +982,16 @@ fn activity_summary_for_panes<'a>(
 
     let mut parts = Vec::new();
     if blocked > 0 {
-        parts.push(format!("{blocked} blocked"));
+        let label = crate::i18n::agent_state_label(language, AgentState::Blocked, true);
+        parts.push(format!("{blocked} {label}"));
     }
     if working > 0 {
-        parts.push(format!("{working} working"));
+        let label = crate::i18n::agent_state_label(language, AgentState::Working, true);
+        parts.push(format!("{working} {label}"));
     }
     if done > 0 {
-        parts.push(format!("{done} done"));
+        let label = crate::i18n::agent_state_label(language, AgentState::Idle, false);
+        parts.push(format!("{done} {label}"));
     }
     parts.join(" · ")
 }
@@ -3199,7 +3216,7 @@ impl AppState {
                 title: format!(
                     "{} {}",
                     toast_agent_label(&agent_label),
-                    toast_event_text(kind)
+                    toast_event_text(self.ui_language, kind)
                 ),
                 context,
                 position: None,

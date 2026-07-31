@@ -1,6 +1,7 @@
 use ratatui::layout::Rect;
 
 use crate::app::state::{AppState, ViewLayout};
+use crate::ui::text::display_width_u16;
 
 use super::ScrollbarClickTarget;
 
@@ -197,35 +198,42 @@ impl AppState {
     }
 
     pub(crate) fn global_menu_labels(&self) -> Vec<&'static str> {
-        let mut labels = vec!["settings", "keybinds", "reload config"];
-        if self.update_available.is_some() {
-            labels.push("update ready");
-        } else if self.latest_release_notes_available {
-            labels.push("what's new");
-        }
-        labels.push("detach");
-        labels
+        self.global_menu_actions()
+            .into_iter()
+            .map(|action| {
+                crate::i18n::global_menu_label(
+                    self.ui_language,
+                    action,
+                    self.update_available.is_some(),
+                )
+            })
+            .collect()
     }
 
     pub(crate) fn global_menu_rect(&self) -> Rect {
         let screen = self.screen_rect();
         let launcher = self.global_launcher_rect();
-        let labels = self.global_menu_labels();
-        let content_width = labels
+        let actions = self.global_menu_actions();
+        let content_width = actions
             .iter()
-            .map(|label| {
-                let badge_width = if self.global_menu_item_has_badge(label) {
+            .map(|action| {
+                let label = crate::i18n::global_menu_label(
+                    self.ui_language,
+                    *action,
+                    self.update_available.is_some(),
+                );
+                let badge_width = if self.global_menu_action_has_badge(*action) {
                     2
                 } else {
                     0
                 };
-                label.chars().count() as u16 + badge_width
+                display_width_u16(label).saturating_add(badge_width)
             })
             .max()
             .unwrap_or(8)
             .saturating_add(2);
         let menu_w = content_width.saturating_add(2).min(screen.width.max(1));
-        let menu_h = (labels.len() as u16 + 2).min(screen.height.max(1));
+        let menu_h = (actions.len() as u16 + 2).min(screen.height.max(1));
         let max_x = screen.x + screen.width.saturating_sub(menu_w);
         let desired_x = launcher.x + launcher.width.saturating_sub(menu_w);
         let x = desired_x.min(max_x);
@@ -474,7 +482,11 @@ impl AppState {
             self.view.sidebar_rect,
             self.sidebar_section_split,
         );
-        let rect = crate::ui::agent_panel_toggle_rect(detail_area, self.agent_panel_sort);
+        let rect = crate::ui::agent_panel_toggle_rect(
+            detail_area,
+            self.ui_language,
+            self.agent_panel_sort,
+        );
         rect.width > 0
             && col >= rect.x
             && col < rect.x + rect.width
@@ -651,6 +663,20 @@ mod tests {
             ]
         );
         assert!(!app.state.should_quit);
+    }
+
+    #[test]
+    fn simplified_chinese_global_menu_preserves_semantic_order() {
+        let mut app = app_for_mouse_test();
+        app.state.ui_language = crate::config::UiLanguage::ZhCn;
+        app.state.update_available = Some("0.3.2".into());
+
+        assert_eq!(
+            app.state.global_menu_labels(),
+            vec!["设置", "快捷键", "重新加载配置", "更新已就绪", "分离会话"]
+        );
+        let menu = app.state.global_menu_rect();
+        assert!(menu.width >= crate::ui::text::display_width_u16("重新加载配置") + 4);
     }
 
     #[test]
@@ -856,7 +882,11 @@ mod tests {
             app.state.view.sidebar_rect,
             app.state.sidebar_section_split,
         );
-        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
+        let toggle = crate::ui::agent_panel_toggle_rect(
+            detail_area,
+            app.state.ui_language,
+            app.state.agent_panel_sort,
+        );
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             toggle.x,

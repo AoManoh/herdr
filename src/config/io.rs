@@ -954,6 +954,25 @@ claude = [["terminal_title"]]
     }
 
     #[test]
+    fn load_live_config_parses_ui_language() {
+        let loaded = load_live_config_from_str("[ui]\nlanguage = \"zh-cn\"").unwrap();
+
+        assert_eq!(loaded.config.ui.language, super::super::UiLanguage::ZhCn);
+        assert!(loaded.diagnostics.is_empty());
+        assert!(loaded.invalid_sections.is_empty());
+    }
+
+    #[test]
+    fn load_live_config_marks_unsupported_ui_language_invalid() {
+        let loaded = load_live_config_from_str("[ui]\nlanguage = \"auto\"").unwrap();
+
+        assert_eq!(loaded.config.ui.language, super::super::UiLanguage::En);
+        assert_eq!(loaded.diagnostics.len(), 1);
+        assert!(loaded.diagnostics[0].contains("invalid ui config"));
+        assert_eq!(loaded.invalid_sections, vec!["ui"]);
+    }
+
+    #[test]
     fn load_live_config_discards_ignored_keys_from_an_invalid_section() {
         let loaded = load_live_config_from_str(
             r#"

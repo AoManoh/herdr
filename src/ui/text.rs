@@ -8,6 +8,11 @@ pub(crate) fn display_width_u16(text: &str) -> u16 {
     display_width(text).min(u16::MAX as usize) as u16
 }
 
+pub(crate) fn pad_to_display_width(text: &str, width: usize) -> String {
+    let padding = width.saturating_sub(display_width(text));
+    format!("{text}{}", " ".repeat(padding))
+}
+
 pub(crate) fn truncate_end(text: &str, max_width: usize) -> String {
     if display_width(text) <= max_width {
         return text.to_string();
@@ -70,6 +75,14 @@ fn take_suffix_width(text: &str, max_width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pad_to_display_width_handles_cjk() {
+        let text = pad_to_display_width("设置", 6);
+
+        assert_eq!(text, "设置  ");
+        assert_eq!(display_width(&text), 6);
+    }
 
     #[test]
     fn truncate_end_uses_display_width() {

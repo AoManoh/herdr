@@ -19,16 +19,23 @@ pub(super) fn render_onboarding_overlay(app: &AppState, frame: &mut Frame, area:
     render_onboarding_welcome(app, frame, area);
 }
 
-pub(crate) fn onboarding_welcome_continue_rect(area: Rect) -> Rect {
+pub(crate) fn onboarding_welcome_continue_rect(
+    area: Rect,
+    language: crate::config::UiLanguage,
+) -> Rect {
     Rect::new(
         area.x,
         area.y,
-        action_button_width(Some("↵"), "continue"),
+        action_button_width(
+            Some("↵"),
+            crate::i18n::onboarding_text(language).continue_label,
+        ),
         1,
     )
 }
 
 fn render_onboarding_welcome(app: &AppState, frame: &mut Frame, area: Rect) {
+    let t = crate::i18n::onboarding_text(app.ui_language);
     let Some(inner) = render_modal_shell(frame, area, 64, 16, &app.palette) else {
         return;
     };
@@ -56,16 +63,12 @@ fn render_onboarding_welcome(app: &AppState, frame: &mut Frame, area: Rect) {
         header_rows[0],
     );
     frame.render_widget(
-        Paragraph::new("  terminal workspace manager for coding agents")
-            .style(Style::default().fg(app.palette.overlay0)),
+        Paragraph::new(t.tagline).style(Style::default().fg(app.palette.overlay0)),
         header_rows[1],
     );
 
     frame.render_widget(
-        Paragraph::new(
-            "  this is a mouse-first terminal.\n  click the sidebar to switch workspaces, drag pane\n  borders to resize, right-click for context menus.",
-        )
-        .style(Style::default().fg(app.palette.overlay1)),
+        Paragraph::new(t.mouse_intro).style(Style::default().fg(app.palette.overlay1)),
         content_rows[0],
     );
 
@@ -77,35 +80,29 @@ fn render_onboarding_welcome(app: &AppState, frame: &mut Frame, area: Rect) {
                 .fg(app.palette.accent)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            " enters prefix mode · ",
-            Style::default().fg(app.palette.overlay1),
-        ),
+        Span::styled(t.enters_prefix, Style::default().fg(app.palette.overlay1)),
         Span::styled(
             "?",
             Style::default()
                 .fg(app.palette.accent)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            " shows keybinds and settings",
-            Style::default().fg(app.palette.overlay1),
-        ),
+        Span::styled(t.shows_help, Style::default().fg(app.palette.overlay1)),
     ]);
     frame.render_widget(Paragraph::new(key_line), content_rows[2]);
 
     frame.render_widget(
-        Paragraph::new("  next: install optional agent integrations for more reliable state")
-            .style(Style::default().fg(app.palette.overlay1)),
+        Paragraph::new(t.next_step).style(Style::default().fg(app.palette.overlay1)),
         content_rows[3],
     );
 
-    let continue_rect = onboarding_welcome_continue_rect(stack.actions.unwrap_or_default());
+    let continue_rect =
+        onboarding_welcome_continue_rect(stack.actions.unwrap_or_default(), app.ui_language);
     render_action_button(
         frame,
         continue_rect,
         Some("↵"),
-        "continue",
+        t.continue_label,
         Style::default()
             .fg(panel_contrast_fg(&app.palette))
             .bg(app.palette.accent)

@@ -548,6 +548,16 @@
       "title": "UI and sidebar",
       "keys": [
         {
+          "key": "ui.language",
+          "type": "enum",
+          "default": "\"en\"",
+          "description": "TUI display language. The server language applies to every attached app client.",
+          "values": [
+            "en",
+            "zh-cn"
+          ]
+        },
+        {
           "key": "ui.sidebar_width",
           "type": "integer",
           "default": "26",

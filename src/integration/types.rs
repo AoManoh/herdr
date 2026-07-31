@@ -149,12 +149,26 @@ impl IntegrationRecommendation {
             || (self.available && self.state == IntegrationStatusKind::NotInstalled)
     }
 
-    pub fn status_label(&self) -> &'static str {
-        match (self.available, self.state) {
-            (_, IntegrationStatusKind::Current) => "installed",
-            (_, IntegrationStatusKind::Outdated) => "update available",
-            (true, IntegrationStatusKind::NotInstalled) => "available",
-            (false, IntegrationStatusKind::NotInstalled) => "not found",
+    pub fn status_label(&self, language: crate::config::UiLanguage) -> &'static str {
+        match (language, self.available, self.state) {
+            (crate::config::UiLanguage::En, _, IntegrationStatusKind::Current) => "installed",
+            (crate::config::UiLanguage::En, _, IntegrationStatusKind::Outdated) => {
+                "update available"
+            }
+            (crate::config::UiLanguage::En, true, IntegrationStatusKind::NotInstalled) => {
+                "available"
+            }
+            (crate::config::UiLanguage::En, false, IntegrationStatusKind::NotInstalled) => {
+                "not found"
+            }
+            (crate::config::UiLanguage::ZhCn, _, IntegrationStatusKind::Current) => "已安装",
+            (crate::config::UiLanguage::ZhCn, _, IntegrationStatusKind::Outdated) => "可更新",
+            (crate::config::UiLanguage::ZhCn, true, IntegrationStatusKind::NotInstalled) => {
+                "可安装"
+            }
+            (crate::config::UiLanguage::ZhCn, false, IntegrationStatusKind::NotInstalled) => {
+                "未找到"
+            }
         }
     }
 }

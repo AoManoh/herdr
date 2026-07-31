@@ -19,7 +19,7 @@ mod sidebar;
 mod status;
 mod tab_surface;
 mod tabs;
-mod text;
+pub(crate) mod text;
 mod widgets;
 
 use self::dialogs::{
@@ -477,6 +477,7 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
                 frame,
                 frame.area(),
                 toast,
+                app.ui_language,
                 has_config_diagnostic,
                 &app.palette,
             );

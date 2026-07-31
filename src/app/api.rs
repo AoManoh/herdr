@@ -435,7 +435,11 @@ impl App {
             return;
         }
         self.state.copy_feedback = Some(crate::app::state::CopyFeedback {
-            message: "copied to clipboard".to_string(),
+            message: match self.state.ui_language {
+                crate::config::UiLanguage::En => "copied to clipboard",
+                crate::config::UiLanguage::ZhCn => "已复制到剪贴板",
+            }
+            .to_string(),
         });
         self.copy_feedback_deadline = Some(Instant::now() + super::COPY_FEEDBACK_DURATION);
     }

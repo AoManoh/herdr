@@ -140,7 +140,7 @@ pub(crate) fn action_button_text(hint: Option<&str>, label: &str) -> String {
 }
 
 pub(crate) fn action_button_width(hint: Option<&str>, label: &str) -> u16 {
-    action_button_text(hint, label).chars().count() as u16
+    super::text::display_width_u16(&action_button_text(hint, label))
 }
 
 pub(crate) struct ActionButtonSpec<'a> {
@@ -275,4 +275,14 @@ pub(super) fn centered_button_row(
             rect
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_button_width_uses_terminal_display_width_for_cjk() {
+        assert_eq!(action_button_width(Some("↵"), "继续"), 8);
+    }
 }

@@ -24,6 +24,8 @@ use super::{
     settings::SettingsAction,
     ScrollbarClickTarget, TAB_DRAG_THRESHOLD, WORKSPACE_DRAG_THRESHOLD,
 };
+#[cfg(test)]
+use crate::app::state::ContextMenuAction;
 
 pub(super) enum MouseAction {
     NewWorkspace,
@@ -234,7 +236,8 @@ impl AppState {
                         popup.width.saturating_sub(2),
                         popup.height.saturating_sub(2),
                     );
-                    let (confirm, cancel) = crate::ui::confirm_close_button_rects(inner);
+                    let (confirm, cancel) =
+                        crate::ui::confirm_close_button_rects(inner, self.ui_language);
                     match modal_action_from_buttons(
                         mouse.column,
                         mouse.row,
@@ -256,7 +259,8 @@ impl AppState {
                     if let Some(inner) =
                         crate::ui::new_linked_worktree_inner_rect(self.screen_rect())
                     {
-                        let (create, cancel) = crate::ui::new_linked_worktree_button_rects(inner);
+                        let (create, cancel) =
+                            crate::ui::new_linked_worktree_button_rects(inner, self.ui_language);
                         match modal_action_from_buttons(
                             mouse.column,
                             mouse.row,
@@ -325,7 +329,10 @@ impl AppState {
                             }
 
                             let (open_button, cancel) =
-                                crate::ui::open_existing_worktree_button_rects(inner);
+                                crate::ui::open_existing_worktree_button_rects(
+                                    inner,
+                                    self.ui_language,
+                                );
                             match modal_action_from_buttons(
                                 mouse.column,
                                 mouse.row,
@@ -360,8 +367,11 @@ impl AppState {
                             .worktree_remove
                             .as_ref()
                             .is_some_and(|remove| remove.force_confirmation);
-                        let (remove, cancel) =
-                            crate::ui::remove_worktree_button_rects(inner, force_confirmation);
+                        let (remove, cancel) = crate::ui::remove_worktree_button_rects(
+                            inner,
+                            self.ui_language,
+                            force_confirmation,
+                        );
                         match modal_action_from_buttons(
                             mouse.column,
                             mouse.row,
@@ -394,7 +404,7 @@ impl AppState {
                 ) {
                     let action = self
                         .rename_modal_inner()
-                        .map(crate::ui::rename_button_rects)
+                        .map(|inner| crate::ui::rename_button_rects(inner, self.ui_language))
                         .and_then(|(save, clear, cancel)| {
                             modal_action_from_buttons(
                                 mouse.column,
@@ -1219,13 +1229,18 @@ impl AppState {
         let menu = self.context_menu.as_ref()?;
         let screen = self.screen_rect();
         let max_item_w = menu
-            .items()
+            .actions()
             .iter()
-            .map(|item| item.len() as u16)
+            .map(|action| {
+                crate::ui::text::display_width_u16(crate::i18n::context_menu_label(
+                    self.ui_language,
+                    *action,
+                ))
+            })
             .max()
             .unwrap_or(0);
         let menu_w = (max_item_w + 4).max(14).min(screen.width.max(1));
-        let menu_h = (menu.items().len() as u16 + 2).min(screen.height.max(1));
+        let menu_h = (menu.actions().len() as u16 + 2).min(screen.height.max(1));
         let x = menu.x.min(screen.x + screen.width.saturating_sub(menu_w));
         let y = menu.y.min(screen.y + screen.height.saturating_sub(menu_h));
         Some(Rect::new(x, y, menu_w, menu_h))
@@ -1244,7 +1259,7 @@ impl AppState {
         let item_count = self
             .context_menu
             .as_ref()
-            .map(|menu| menu.items().len() as u16)
+            .map(|menu| menu.actions().len() as u16)
             .unwrap_or(0);
         if col >= inner_x
             && col < inner_x + inner_w
@@ -2353,9 +2368,9 @@ mod tests {
             } if pane_id == target && source_pane_id == source
         ));
         let swap_idx = menu
-            .items()
+            .actions()
             .iter()
-            .position(|item| *item == "Swap with focused pane")
+            .position(|action| *action == ContextMenuAction::SwapWithFocusedPane)
             .expect("swap item");
         menu.list.highlighted = swap_idx;
 
@@ -2433,7 +2448,9 @@ mod tests {
                 ..
             } if pane_id == target && source_pane_id == source
         ));
-        assert!(menu.items().contains(&"Swap with focused pane"));
+        assert!(menu
+            .actions()
+            .contains(&ContextMenuAction::SwapWithFocusedPane));
     }
 
     #[tokio::test]
@@ -2685,7 +2702,7 @@ mod tests {
             popup.width.saturating_sub(2),
             popup.height.saturating_sub(2),
         );
-        let (confirm, _) = crate::ui::confirm_close_button_rects(inner);
+        let (confirm, _) = crate::ui::confirm_close_button_rects(inner, app.state.ui_language);
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
@@ -2708,7 +2725,7 @@ mod tests {
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 24));
         let inner = app.state.rename_modal_inner().unwrap();
-        let (save, _, _) = crate::ui::rename_button_rects(inner);
+        let (save, _, _) = crate::ui::rename_button_rects(inner, app.state.ui_language);
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
@@ -2747,7 +2764,8 @@ mod tests {
         app.state.worktree_open = Some(sample_worktree_open_state());
         let inner =
             crate::ui::open_existing_worktree_inner_rect(app.state.screen_rect(), 2).unwrap();
-        let (open, _) = crate::ui::open_existing_worktree_button_rects(inner);
+        let (open, _) =
+            crate::ui::open_existing_worktree_button_rects(inner, app.state.ui_language);
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
@@ -2763,7 +2781,8 @@ mod tests {
         app.state.worktree_open = Some(sample_worktree_open_state());
         let inner =
             crate::ui::open_existing_worktree_inner_rect(app.state.screen_rect(), 2).unwrap();
-        let (_, cancel) = crate::ui::open_existing_worktree_button_rects(inner);
+        let (_, cancel) =
+            crate::ui::open_existing_worktree_button_rects(inner, app.state.ui_language);
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
@@ -2807,7 +2826,8 @@ mod tests {
             popup.width.saturating_sub(2),
             popup.height.saturating_sub(2),
         );
-        let (remove, _) = crate::ui::remove_worktree_button_rects(inner, false);
+        let (remove, _) =
+            crate::ui::remove_worktree_button_rects(inner, app.state.ui_language, false);
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
@@ -2835,7 +2855,8 @@ mod tests {
             popup.width.saturating_sub(2),
             popup.height.saturating_sub(2),
         );
-        let (_, cancel) = crate::ui::remove_worktree_button_rects(inner, false);
+        let (_, cancel) =
+            crate::ui::remove_worktree_button_rects(inner, app.state.ui_language, false);
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
@@ -2877,7 +2898,7 @@ mod tests {
             popup.width.saturating_sub(2),
             popup.height.saturating_sub(2),
         );
-        let (confirm, _) = crate::ui::confirm_close_button_rects(inner);
+        let (confirm, _) = crate::ui::confirm_close_button_rects(inner, app.state.ui_language);
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             confirm.x + 1,
@@ -3493,9 +3514,9 @@ mod tests {
 
         let menu_state = app.state.context_menu.as_ref().expect("pane context menu");
         let close_idx = menu_state
-            .items()
+            .actions()
             .iter()
-            .position(|item| *item == "Close pane")
+            .position(|action| *action == ContextMenuAction::ClosePane)
             .expect("close pane menu item");
         let menu = app
             .state
@@ -3546,9 +3567,9 @@ mod tests {
 
         let menu_state = app.state.context_menu.as_ref().expect("pane context menu");
         let close_idx = menu_state
-            .items()
+            .actions()
             .iter()
-            .position(|item| *item == "Close pane")
+            .position(|action| *action == ContextMenuAction::ClosePane)
             .expect("close pane menu item");
         let menu = app
             .state

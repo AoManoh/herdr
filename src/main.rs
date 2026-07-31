@@ -67,6 +67,7 @@ mod detect;
 mod events;
 mod ghostty;
 mod handoff_runtime;
+mod i18n;
 mod input;
 mod integration;
 mod ipc;
@@ -246,6 +247,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # directory = "~/.herdr/worktrees"
 
 [ui]
+# TUI display language: "en" or "zh-cn".
+# language = "en"
+
 # Sidebar width (auto-scaled based on workspace names, this sets the default)
 # sidebar_width = 26
 
@@ -858,6 +862,12 @@ fn main() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_config_documents_ui_language() {
+        assert!(DEFAULT_CONFIG.contains("language = \"en\""));
+        assert!(DEFAULT_CONFIG.contains("\"en\" or \"zh-cn\""));
+    }
 
     #[test]
     fn nested_herdr_blocks_when_env_is_set() {

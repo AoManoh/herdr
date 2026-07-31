@@ -48,6 +48,7 @@ pub(super) fn render_navigator_overlay(
 
 fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
     let p = &app.palette;
+    let t = crate::i18n::navigator_text(app.ui_language);
     let focus_style = if app.navigator.search_focused {
         Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
     } else {
@@ -66,40 +67,49 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
             &mut spans,
             crate::detect::AgentState::Blocked,
             true,
-            "blocked",
+            crate::i18n::agent_state_label(
+                app.ui_language,
+                crate::detect::AgentState::Blocked,
+                true,
+            ),
             app,
         ),
         Some(NavigatorStateFilter::Working) => push_state_chip(
             &mut spans,
             crate::detect::AgentState::Working,
             true,
-            "working",
+            crate::i18n::agent_state_label(
+                app.ui_language,
+                crate::detect::AgentState::Working,
+                true,
+            ),
             app,
         ),
         Some(NavigatorStateFilter::Idle) => push_state_chip(
             &mut spans,
             crate::detect::AgentState::Idle,
             true,
-            "idle",
+            crate::i18n::agent_state_label(app.ui_language, crate::detect::AgentState::Idle, true),
             app,
         ),
         Some(NavigatorStateFilter::Done) => push_state_chip(
             &mut spans,
             crate::detect::AgentState::Idle,
             false,
-            "done",
+            crate::i18n::agent_state_label(app.ui_language, crate::detect::AgentState::Idle, false),
             app,
         ),
         None if query.is_empty() => spans.push(Span::styled(
-            "search panes",
+            t.search_panes,
             Style::default().fg(p.overlay0),
         )),
         None => spans.push(Span::styled(query.to_string(), Style::default().fg(p.text))),
     }
     spans.push(Span::styled(
-        format!(
-            "{count:>width$} panes",
-            width = area.width.saturating_sub(16) as usize
+        crate::i18n::aligned_pane_total(
+            app.ui_language,
+            count,
+            area.width.saturating_sub(16) as usize,
         ),
         Style::default().fg(p.overlay0),
     ));
@@ -397,7 +407,7 @@ fn workspace_detail(
     };
     let label = ws.display_name_from(&app.terminals, terminal_runtimes);
     let pane_count = ws.tabs.iter().map(|tab| tab.panes.len()).sum::<usize>();
-    let mut parts = vec![label, format!("{pane_count} panes")];
+    let mut parts = vec![label, crate::i18n::pane_total(app.ui_language, pane_count)];
     if !rowless_workspace_activity(app, terminal_runtimes, ws_idx).is_empty() {
         parts.push(rowless_workspace_activity(app, terminal_runtimes, ws_idx));
     }
@@ -416,14 +426,16 @@ fn tab_detail(
     let Some(tab) = ws.tabs.get(tab_idx) else {
         return String::new();
     };
+    let t = crate::i18n::navigator_text(app.ui_language);
     let mut parts = vec![
         ws.display_name_from(&app.terminals, terminal_runtimes),
         format!(
-            "tab: {}",
+            "{}: {}",
+            t.tab,
             ws.tab_display_name(tab_idx)
                 .unwrap_or_else(|| (tab_idx + 1).to_string())
         ),
-        format!("{} panes", tab.panes.len()),
+        crate::i18n::pane_total(app.ui_language, tab.panes.len()),
     ];
     let rows = app.navigator_rows_from(terminal_runtimes);
     if let Some(meta) = rows
@@ -450,16 +462,18 @@ fn pane_detail(
     let Some(tab) = ws.tabs.get(tab_idx) else {
         return String::new();
     };
+    let t = crate::i18n::navigator_text(app.ui_language);
     let mut parts = vec![ws.display_name_from(&app.terminals, terminal_runtimes)];
     if ws.tabs.len() > 1 {
         parts.push(format!(
-            "tab: {}",
+            "{}: {}",
+            t.tab,
             ws.tab_display_name(tab_idx)
                 .unwrap_or_else(|| (tab_idx + 1).to_string())
         ));
     }
     if let Some(pane_number) = ws.public_pane_number(pane_id) {
-        parts.push(format!("pane {pane_number}"));
+        parts.push(format!("{} {pane_number}", t.pane));
     }
     if let Some(terminal_id) = tab.terminal_id(pane_id) {
         if let Some(terminal) = app.terminals.get(terminal_id) {
@@ -481,14 +495,17 @@ fn pane_detail(
                     .map(|pane| pane.seen)
                     .unwrap_or(true);
                 let state = row_state(app, ws_idx, tab_idx, pane_id);
+                let state_key = display_state(state, seen);
                 let status = presentation
                     .state_labels
-                    .get(display_state(state, seen))
+                    .get(state_key)
                     .cloned()
-                    .unwrap_or_else(|| display_state(state, seen).to_string());
+                    .unwrap_or_else(|| {
+                        crate::i18n::agent_state_label(app.ui_language, state, seen).to_string()
+                    });
                 parts.push(status);
             } else {
-                parts.push("shell".to_string());
+                parts.push(t.shell.to_string());
             }
         }
     }
@@ -536,32 +553,33 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
     if area.height == 0 {
         return;
     }
+    let t = crate::i18n::navigator_text(app.ui_language);
     let p = &app.palette;
     let key = Style::default().fg(p.accent).add_modifier(Modifier::BOLD);
     let dim = Style::default().fg(p.overlay0);
     let line = if app.navigator.search_focused {
         Line::from(vec![
-            Span::styled(" enter", key),
-            Span::styled(" switch  ", dim),
+            Span::styled(t.enter, key),
+            Span::styled(t.switch, dim),
             Span::styled("↑↓", key),
-            Span::styled(" move  ", dim),
+            Span::styled(t.move_hint, dim),
             Span::styled("ctrl+u", key),
-            Span::styled(" clear  ", dim),
+            Span::styled(t.clear, dim),
             Span::styled("esc", key),
-            Span::styled(" back", dim),
+            Span::styled(t.back, dim),
         ])
     } else {
         Line::from(vec![
-            Span::styled(" enter", key),
-            Span::styled(" switch  ", dim),
+            Span::styled(t.enter, key),
+            Span::styled(t.switch, dim),
             Span::styled("/", key),
-            Span::styled(" search  ", dim),
+            Span::styled(t.search, dim),
             Span::styled("b/w/i/d/a", key),
-            Span::styled(" states  ", dim),
+            Span::styled(t.states, dim),
             Span::styled("j/k/↑↓", key),
-            Span::styled(" move  ", dim),
+            Span::styled(t.move_hint, dim),
             Span::styled("esc", key),
-            Span::styled(" close", dim),
+            Span::styled(t.close, dim),
         ])
     };
     frame.render_widget(Paragraph::new(line), area);

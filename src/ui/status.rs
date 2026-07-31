@@ -24,7 +24,7 @@ pub(crate) fn copy_feedback_rect(
         return Rect::default();
     }
 
-    let content_width = feedback.message.len() as u16 + 4;
+    let content_width = display_width_u16(&feedback.message).saturating_add(4);
     let width = content_width.min(area.width);
     let height = 3u16.min(area.height);
     let x = match position {
@@ -180,7 +180,7 @@ pub(super) fn render_config_diagnostic(frame: &mut Frame, area: Rect, message: &
         .enumerate()
     {
         let text = format!(" {line} ");
-        let width = (text.len() as u16).min(area.width);
+        let width = display_width_u16(&text).min(area.width);
         let notif_area = Rect::new(
             area.x + area.width.saturating_sub(width),
             area.y + row as u16,
@@ -203,14 +203,12 @@ pub(super) fn state_dot(state: AgentState, seen: bool, p: &Palette) -> (&'static
     }
 }
 
-pub(super) fn state_label(state: AgentState, seen: bool) -> &'static str {
-    match (state, seen) {
-        (AgentState::Blocked, _) => "blocked",
-        (AgentState::Working, _) => "working",
-        (AgentState::Idle, false) => "done",
-        (AgentState::Idle, true) => "idle",
-        (AgentState::Unknown, _) => "idle",
-    }
+pub(super) fn state_label(
+    language: crate::config::UiLanguage,
+    state: AgentState,
+    seen: bool,
+) -> &'static str {
+    crate::i18n::agent_state_label(language, state, seen)
 }
 
 pub(super) fn state_label_color(state: AgentState, seen: bool, p: &Palette) -> Color {

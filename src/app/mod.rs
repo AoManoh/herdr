@@ -611,6 +611,7 @@ impl App {
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
+            ui_language: config.ui.language,
             prefix_code,
             prefix_mods,
             default_sidebar_width: config.ui.sidebar_width,
@@ -1309,7 +1310,7 @@ impl App {
         if targets.is_empty() {
             self.state
                 .integration_install_messages
-                .push("all detected integrations are current".to_string());
+                .push(crate::i18n::integrations_current(self.state.ui_language).to_string());
             return;
         }
 
@@ -1317,9 +1318,9 @@ impl App {
             let label = crate::integration::integration_target_label(target);
             match crate::integration::install_target(target) {
                 Ok(messages) => {
-                    self.state
-                        .integration_install_messages
-                        .push(format!("installed {label}"));
+                    self.state.integration_install_messages.push(
+                        crate::i18n::integration_installed(self.state.ui_language, label),
+                    );
                     self.state
                         .integration_install_messages
                         .extend(messages.into_iter().filter(|message| {
@@ -1414,6 +1415,7 @@ impl App {
             } else {
                 diagnostics.extend(config.ui.sound.diagnostics());
 
+                self.state.ui_language = config.ui.language;
                 self.state.default_sidebar_width = config.ui.sidebar_width;
                 if self.state.sidebar_width_source == state::SidebarWidthSource::ConfigDefault {
                     self.state.sidebar_width = config.ui.sidebar_width;
@@ -1552,8 +1554,16 @@ impl App {
             if notify_success {
                 self.state.toast = Some(crate::app::state::ToastNotification {
                     kind: crate::app::state::ToastKind::UpdateInstalled,
-                    title: "reloaded config".to_string(),
-                    context: "using config.toml".to_string(),
+                    title: crate::i18n::text(
+                        self.state.ui_language,
+                        crate::i18n::UiText::ReloadedConfig,
+                    )
+                    .to_string(),
+                    context: crate::i18n::text(
+                        self.state.ui_language,
+                        crate::i18n::UiText::UsingConfigToml,
+                    )
+                    .to_string(),
                     position: None,
                     target: None,
                 });
@@ -1564,8 +1574,16 @@ impl App {
             if notify_success {
                 self.state.toast = Some(crate::app::state::ToastNotification {
                     kind: crate::app::state::ToastKind::UpdateInstalled,
-                    title: "reloaded config".to_string(),
-                    context: "with warnings".to_string(),
+                    title: crate::i18n::text(
+                        self.state.ui_language,
+                        crate::i18n::UiText::ReloadedConfig,
+                    )
+                    .to_string(),
+                    context: crate::i18n::text(
+                        self.state.ui_language,
+                        crate::i18n::UiText::WithWarnings,
+                    )
+                    .to_string(),
                     position: None,
                     target: None,
                 });
@@ -2810,6 +2828,40 @@ mod tests {
         assert_eq!(toast.kind, crate::app::state::ToastKind::UpdateInstalled);
         assert_eq!(toast.title, "reloaded config");
         assert_eq!(toast.context, "using config.toml");
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_switches_ui_language_without_client_reload() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-language");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "[ui]\nlanguage = \"zh-cn\"\n").unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        app.state.request_client_config_reload = false;
+
+        let report = app.reload_config();
+
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.ui_language, crate::config::UiLanguage::ZhCn);
+        assert!(!app.state.request_client_config_reload);
+        let toast = app.state.toast.as_ref().unwrap();
+        assert_eq!(toast.title, "已重新加载配置");
+        assert_eq!(toast.context, "正在使用 config.toml");
+
+        std::fs::write(&path, "[ui]\nlanguage = \"auto\"\n").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Partial);
+        assert_eq!(app.state.ui_language, crate::config::UiLanguage::ZhCn);
+
+        std::fs::write(&path, "[ui]\n").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.ui_language, crate::config::UiLanguage::En);
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

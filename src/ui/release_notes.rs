@@ -20,6 +20,7 @@ pub(crate) const RELEASE_NOTES_MODAL_SIZE: (u16, u16) = (80, 24);
 pub(crate) const PRODUCT_ANNOUNCEMENT_MODAL_SIZE: (u16, u16) = (88, 24);
 
 pub(super) fn render_release_notes_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
+    let t = crate::i18n::release_text(app.ui_language);
     let Some(notes) = &app.release_notes else {
         return;
     };
@@ -63,9 +64,9 @@ pub(super) fn render_release_notes_overlay(app: &AppState, frame: &mut Frame, ar
         &app.palette,
     );
     let subtitle = if notes.preview {
-        "update ready"
+        t.update_ready
     } else {
-        "what's new in this release"
+        t.whats_new
     };
     frame.render_widget(
         Paragraph::new(subtitle).style(Style::default().fg(app.palette.overlay1)),
@@ -73,9 +74,9 @@ pub(super) fn render_release_notes_overlay(app: &AppState, frame: &mut Frame, ar
     );
     render_action_button(
         frame,
-        release_notes_close_button_rect(header_rows[0]),
+        release_notes_close_button_rect(header_rows[0], t.close),
         Some("esc"),
-        "close",
+        t.close,
         Style::default()
             .fg(panel_contrast_fg(&app.palette))
             .bg(app.palette.accent)
@@ -124,10 +125,10 @@ pub(super) fn render_release_notes_overlay(app: &AppState, frame: &mut Frame, ar
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" scroll ", Style::default().fg(app.palette.overlay0)),
+            Span::styled(t.scroll, Style::default().fg(app.palette.overlay0)),
             Span::styled("wheel ↑↓", Style::default().fg(app.palette.text)),
             Span::styled("  ·  ", Style::default().fg(app.palette.overlay0)),
-            Span::styled("close", Style::default().fg(app.palette.overlay0)),
+            Span::styled(t.close, Style::default().fg(app.palette.overlay0)),
             Span::styled(" esc / enter ", Style::default().fg(app.palette.text)),
         ])),
         stack.footer.unwrap_or_default(),
@@ -135,6 +136,7 @@ pub(super) fn render_release_notes_overlay(app: &AppState, frame: &mut Frame, ar
 }
 
 pub(super) fn render_product_announcement_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
+    let t = crate::i18n::release_text(app.ui_language);
     let Some(announcement) = &app.product_announcement else {
         return;
     };
@@ -173,9 +175,9 @@ pub(super) fn render_product_announcement_overlay(app: &AppState, frame: &mut Fr
 
     render_modal_header(frame, header_title_area, &announcement.title, &app.palette);
     let subtitle = if announcement.preview {
-        "product announcement preview"
+        t.announcement_preview
     } else {
-        "product announcement"
+        t.announcement
     };
     frame.render_widget(
         Paragraph::new(format!("{subtitle} · v{}", announcement.version))
@@ -184,9 +186,9 @@ pub(super) fn render_product_announcement_overlay(app: &AppState, frame: &mut Fr
     );
     render_action_button(
         frame,
-        release_notes_close_button_rect(header_rows[0]),
+        release_notes_close_button_rect(header_rows[0], t.close),
         Some("esc"),
-        "close",
+        t.close,
         Style::default()
             .fg(panel_contrast_fg(&app.palette))
             .bg(app.palette.accent)
@@ -235,10 +237,10 @@ pub(super) fn render_product_announcement_overlay(app: &AppState, frame: &mut Fr
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" scroll ", Style::default().fg(app.palette.overlay0)),
+            Span::styled(t.scroll, Style::default().fg(app.palette.overlay0)),
             Span::styled("wheel ↑↓", Style::default().fg(app.palette.text)),
             Span::styled("  ·  ", Style::default().fg(app.palette.overlay0)),
-            Span::styled("close", Style::default().fg(app.palette.overlay0)),
+            Span::styled(t.close, Style::default().fg(app.palette.overlay0)),
             Span::styled(" esc / enter ", Style::default().fg(app.palette.text)),
         ])),
         stack.footer.unwrap_or_default(),
@@ -439,8 +441,8 @@ pub(crate) fn release_notes_wrapped_line_count(lines: &[(usize, Line<'_>)], widt
     .line_count(width.max(1))
 }
 
-pub(crate) fn release_notes_close_button_rect(area: Rect) -> Rect {
-    let width = action_button_width(Some("esc"), "close");
+pub(crate) fn release_notes_close_button_rect(area: Rect, label: &str) -> Rect {
+    let width = action_button_width(Some("esc"), label);
     Rect::new(area.x + area.width.saturating_sub(width), area.y, width, 1)
 }
 

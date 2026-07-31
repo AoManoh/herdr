@@ -12,7 +12,7 @@ use super::sidebar::{
     WorkspaceListEntry,
 };
 use super::status::state_dot;
-use super::text::{display_width_u16, truncate_end};
+use super::text::{display_width, display_width_u16, truncate_end};
 use crate::app::state::{Palette, ToastKind, ToastNotification};
 use crate::app::AppState;
 use crate::detect::AgentState;
@@ -237,6 +237,7 @@ pub(crate) fn render_mobile_toast_banner(
     frame: &mut Frame,
     area: Rect,
     toast: &ToastNotification,
+    language: crate::config::UiLanguage,
     offset_for_warning: bool,
     p: &Palette,
 ) {
@@ -260,7 +261,7 @@ pub(crate) fn render_mobile_toast_banner(
             Span::styled("●", Style::default().fg(dot_color).bg(bg)),
             Span::styled(" ", Style::default().bg(bg)),
             Span::styled(
-                mobile_toast_title(toast),
+                mobile_toast_title(language, toast),
                 Style::default()
                     .fg(p.text)
                     .bg(bg)
@@ -284,12 +285,13 @@ pub(crate) fn render_mobile_panel(
     }
 
     let p = &app.palette;
+    let t = crate::i18n::mobile_text(app.ui_language);
     frame.render_widget(Clear, area);
     fill_rect(frame, area, Style::default().bg(p.panel_bg));
 
     let areas = mobile_switcher_areas(app);
     frame.render_widget(
-        Paragraph::new(" switch").style(
+        Paragraph::new(format!(" {}", t.switch)).style(
             Style::default()
                 .fg(p.text)
                 .bg(p.panel_bg)
@@ -321,13 +323,16 @@ fn render_header_status(
     }
     let p = &app.palette;
     let Some(ws) = app.active.and_then(|idx| app.workspaces.get(idx)) else {
-        frame.render_widget(Paragraph::new(" no workspace"), area);
+        frame.render_widget(
+            Paragraph::new(crate::i18n::mobile_text(app.ui_language).no_workspace),
+            area,
+        );
         return;
     };
 
     let (state, seen) = ws.aggregate_state(&app.terminals);
     let (dot, dot_style) = state_dot(state, seen, p);
-    let tab_label = mobile_tab_status(ws);
+    let tab_label = mobile_tab_status(app.ui_language, ws);
     let row1 = Rect::new(area.x, area.y, area.width, 1);
     let tab_w = display_width_u16(&tab_label)
         .saturating_add(1)
@@ -367,15 +372,15 @@ fn render_header_status(
     }
 }
 
-fn mobile_tab_status(ws: &crate::workspace::Workspace) -> String {
+fn mobile_tab_status(
+    language: crate::config::UiLanguage,
+    ws: &crate::workspace::Workspace,
+) -> String {
     let tab_label = ws
         .tab_display_name(ws.active_tab)
         .unwrap_or_else(|| (ws.active_tab + 1).to_string());
-    if ws.tabs.len() <= 1 {
-        format!("tab {tab_label}")
-    } else {
-        format!("tab {tab_label} · {}/{}", ws.active_tab + 1, ws.tabs.len())
-    }
+    let position = (ws.tabs.len() > 1).then_some((ws.active_tab + 1, ws.tabs.len()));
+    crate::i18n::mobile_tab_label(language, &tab_label, position)
 }
 
 fn render_switch_button(app: &AppState, frame: &mut Frame, area: Rect) {
@@ -391,7 +396,7 @@ fn render_switch_button(app: &AppState, frame: &mut Frame, area: Rect) {
     }
     let label_y = if area.height > 1 { area.y + 1 } else { area.y };
     frame.render_widget(
-        Paragraph::new("switch")
+        Paragraph::new(crate::i18n::mobile_text(app.ui_language).switch)
             .style(
                 Style::default()
                     .fg(p.text)
@@ -424,7 +429,7 @@ fn render_close_button(app: &AppState, frame: &mut Frame, area: Rect) {
             .set_style(Style::default().fg(p.surface_dim).bg(p.surface0));
     }
     frame.render_widget(
-        Paragraph::new("close")
+        Paragraph::new(crate::i18n::mobile_text(app.ui_language).close)
             .style(
                 Style::default()
                     .fg(p.overlay1)
@@ -474,6 +479,7 @@ fn render_mobile_switcher_content(
     }
 
     let p = &app.palette;
+    let t = crate::i18n::mobile_text(app.ui_language);
     let total_height = mobile_switcher_content_height(app);
     render_left_scrollbar(
         frame,
@@ -500,8 +506,14 @@ fn render_mobile_switcher_content(
         let title = app
             .agent_view_override
             .as_ref()
-            .map(|view| format!("agents · {}", view.label.as_deref().unwrap_or("filtered")))
-            .unwrap_or_else(|| "agents".to_string());
+            .map(|view| {
+                format!(
+                    "{} · {}",
+                    t.agents,
+                    view.label.as_deref().unwrap_or(t.filtered)
+                )
+            })
+            .unwrap_or_else(|| t.agents.to_string());
         render_section_title_at(
             frame,
             viewport,
@@ -521,7 +533,7 @@ fn render_mobile_switcher_content(
                 app.mobile_switcher_scroll,
                 ratatui::style::Color::Reset,
                 Line::from(Span::styled(
-                    "  no matching agents",
+                    t.no_matching_agents,
                     Style::default().fg(p.overlay0).add_modifier(Modifier::DIM),
                 )),
             );
@@ -548,7 +560,7 @@ fn render_mobile_switcher_content(
                         .add_modifier(Modifier::BOLD),
                 ),
             ]);
-            let detail = mobile_agent_detail(entry);
+            let detail = mobile_agent_detail(app.ui_language, entry);
             render_two_line_item(
                 frame,
                 viewport,
@@ -570,7 +582,7 @@ fn render_mobile_switcher_content(
         content,
         doc_y,
         app.mobile_switcher_scroll,
-        "spaces",
+        t.spaces,
         p,
     );
     doc_y += 1;
@@ -580,7 +592,7 @@ fn render_mobile_switcher_content(
         content,
         doc_y,
         app.mobile_switcher_scroll,
-        "+ new workspace",
+        t.new_workspace,
         p,
     );
     doc_y += 1;
@@ -639,8 +651,8 @@ fn render_mobile_switcher_content(
 
         let detail = format!(
             "{detail_prefix}{} · {}",
-            ws.branch().unwrap_or_else(|| "shell".into()),
-            mobile_tab_status(ws)
+            ws.branch().unwrap_or_else(|| t.shell.into()),
+            mobile_tab_status(app.ui_language, ws)
         );
         render_two_line_item(
             frame,
@@ -663,7 +675,7 @@ fn render_mobile_switcher_content(
             content,
             doc_y,
             app.mobile_switcher_scroll,
-            "tabs",
+            t.tabs,
             p,
         );
         doc_y += 1;
@@ -673,7 +685,7 @@ fn render_mobile_switcher_content(
             content,
             doc_y,
             app.mobile_switcher_scroll,
-            "+ new tab",
+            t.new_tab,
             p,
         );
         doc_y += 1;
@@ -684,7 +696,7 @@ fn render_mobile_switcher_content(
                 .tab_display_name(idx)
                 .unwrap_or_else(|| (idx + 1).to_string());
             let label = if tab.is_auto_named() {
-                format!("tab {display_name}")
+                crate::i18n::mobile_tab_label(app.ui_language, &display_name, None)
             } else {
                 format!("{} · {display_name}", idx + 1)
             };
@@ -717,7 +729,7 @@ fn render_mobile_switcher_content(
         content,
         doc_y,
         app.mobile_switcher_scroll,
-        "menu",
+        t.menu,
         p,
     );
     doc_y += 1;
@@ -733,7 +745,7 @@ fn render_mobile_switcher_content(
     }
 }
 
-fn mobile_agent_detail(entry: &AgentPanelEntry) -> String {
+fn mobile_agent_detail(language: crate::config::UiLanguage, entry: &AgentPanelEntry) -> String {
     let mut parts = Vec::new();
     if let Some(tab_label) = entry.primary_tab_label.as_deref() {
         parts.push(tab_label.to_string());
@@ -745,7 +757,9 @@ fn mobile_agent_detail(entry: &AgentPanelEntry) -> String {
             entry.seen,
         ))
         .cloned()
-        .unwrap_or_else(|| super::status::state_label(entry.state, entry.seen).to_string());
+        .unwrap_or_else(|| {
+            super::status::state_label(language, entry.state, entry.seen).to_string()
+        });
     parts.push(status);
     if let Some(agent_label) = entry.agent_label.as_deref() {
         parts.push(agent_label.to_string());
@@ -1010,28 +1024,36 @@ enum SummaryTone {
 
 /// Ordered, non-zero breakdown for the header roll-up: attention states lead
 /// (blocked → done → working → idle). Pure so it can be unit-tested.
-fn agent_summary_segments(counts: GlobalAgentCounts) -> Vec<(String, SummaryTone)> {
+fn agent_summary_segments(
+    language: crate::config::UiLanguage,
+    counts: GlobalAgentCounts,
+) -> Vec<(String, SummaryTone)> {
+    let t = crate::i18n::mobile_text(language);
     if counts.total() == 0 {
-        return vec![("no agents".to_string(), SummaryTone::Muted)];
+        return vec![(t.no_agents.to_string(), SummaryTone::Muted)];
     }
     if !counts.any_pending() {
-        return vec![("all idle".to_string(), SummaryTone::Muted)];
+        return vec![(t.all_idle.to_string(), SummaryTone::Muted)];
     }
     let mut segments = Vec::new();
     if counts.blocked > 0 {
+        let label = crate::i18n::agent_state_label(language, AgentState::Blocked, true);
         segments.push((
-            format!("◉ {} blocked", counts.blocked),
+            format!("◉ {} {label}", counts.blocked),
             SummaryTone::Blocked,
         ));
     }
     if counts.done > 0 {
-        segments.push((format!("● {} done", counts.done), SummaryTone::Done));
+        let label = crate::i18n::agent_state_label(language, AgentState::Idle, false);
+        segments.push((format!("● {} {label}", counts.done), SummaryTone::Done));
     }
     if counts.working > 0 {
-        segments.push((format!("{} working", counts.working), SummaryTone::Working));
+        let label = crate::i18n::agent_state_label(language, AgentState::Working, true);
+        segments.push((format!("{} {label}", counts.working), SummaryTone::Working));
     }
     if counts.idle > 0 {
-        segments.push((format!("{} idle", counts.idle), SummaryTone::Idle));
+        let label = crate::i18n::agent_state_label(language, AgentState::Idle, true);
+        segments.push((format!("{} {label}", counts.idle), SummaryTone::Idle));
     }
     segments
 }
@@ -1048,7 +1070,7 @@ fn fit_summary_segments(
     let mut used = 1usize; // leading space
     for (idx, segment) in segments.iter().enumerate() {
         let sep = if idx > 0 { 3 } else { 0 }; // " · "
-        let seg_w = segment.0.chars().count();
+        let seg_w = display_width(&segment.0);
         if used + sep + seg_w > max_width {
             break;
         }
@@ -1060,7 +1082,7 @@ fn fit_summary_segments(
 }
 
 fn agent_summary_line(app: &AppState, p: &Palette, max_width: u16) -> Line<'static> {
-    let segments = agent_summary_segments(global_agent_counts(app));
+    let segments = agent_summary_segments(app.ui_language, global_agent_counts(app));
     let (shown, truncated) = fit_summary_segments(segments, max_width as usize);
 
     let mut spans = vec![Span::styled(" ", Style::default().bg(p.panel_bg))];
@@ -1091,7 +1113,7 @@ fn agent_summary_line(app: &AppState, p: &Palette, max_width: u16) -> Line<'stat
         } else {
             Style::default().fg(p.overlay1).bg(p.panel_bg)
         };
-        used += text.chars().count();
+        used += display_width(&text);
         spans.push(Span::styled(text, style));
     }
     if truncated && used + 2 <= max_width as usize {
@@ -1103,7 +1125,7 @@ fn agent_summary_line(app: &AppState, p: &Palette, max_width: u16) -> Line<'stat
     Line::from(spans)
 }
 
-fn mobile_toast_title(toast: &ToastNotification) -> String {
+fn mobile_toast_title(language: crate::config::UiLanguage, toast: &ToastNotification) -> String {
     match toast.kind {
         ToastKind::NeedsAttention => toast
             .title
@@ -1115,7 +1137,7 @@ fn mobile_toast_title(toast: &ToastNotification) -> String {
             .strip_suffix(" finished")
             .map(|agent| format!("{agent} done"))
             .unwrap_or_else(|| toast.title.clone()),
-        ToastKind::UpdateInstalled => "update ready".to_string(),
+        ToastKind::UpdateInstalled => crate::i18n::mobile_text(language).update_ready.to_string(),
     }
 }
 
@@ -1211,7 +1233,7 @@ mod tests {
             working: 2,
             idle: 1,
         };
-        let segments = agent_summary_segments(counts);
+        let segments = agent_summary_segments(crate::config::UiLanguage::En, counts);
         let labels: Vec<&str> = segments.iter().map(|(text, _)| text.as_str()).collect();
         assert_eq!(
             labels,
@@ -1227,7 +1249,7 @@ mod tests {
             working: 2,
             ..Default::default()
         };
-        let labels: Vec<String> = agent_summary_segments(counts)
+        let labels: Vec<String> = agent_summary_segments(crate::config::UiLanguage::En, counts)
             .into_iter()
             .map(|(text, _)| text)
             .collect();
@@ -1244,7 +1266,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            agent_summary_segments(counts),
+            agent_summary_segments(crate::config::UiLanguage::En, counts),
             vec![("all idle".to_string(), SummaryTone::Muted)]
         );
     }
@@ -1257,7 +1279,10 @@ mod tests {
             working: 2,
             idle: 1,
         };
-        let (shown, truncated) = fit_summary_segments(agent_summary_segments(counts), 24);
+        let (shown, truncated) = fit_summary_segments(
+            agent_summary_segments(crate::config::UiLanguage::En, counts),
+            24,
+        );
         let labels: Vec<&str> = shown.iter().map(|(text, _)| text.as_str()).collect();
         assert_eq!(labels, vec!["◉ 2 blocked", "● 1 done"]);
         assert!(truncated);
@@ -1271,7 +1296,10 @@ mod tests {
             working: 2,
             idle: 1,
         };
-        let (shown, truncated) = fit_summary_segments(agent_summary_segments(counts), 60);
+        let (shown, truncated) = fit_summary_segments(
+            agent_summary_segments(crate::config::UiLanguage::En, counts),
+            60,
+        );
         assert_eq!(shown.len(), 4);
         assert!(!truncated);
     }
@@ -1279,7 +1307,7 @@ mod tests {
     #[test]
     fn agent_summary_reports_no_agents_when_empty() {
         assert_eq!(
-            agent_summary_segments(GlobalAgentCounts::default()),
+            agent_summary_segments(crate::config::UiLanguage::En, GlobalAgentCounts::default(),),
             vec![("no agents".to_string(), SummaryTone::Muted)]
         );
     }
@@ -1376,14 +1404,20 @@ mod tests {
     fn mobile_agent_detail_includes_tab_context_when_available() {
         let entry = agent_entry(Some("mobile-state"), Some("pi"));
 
-        assert_eq!(mobile_agent_detail(&entry), "  mobile-state · idle · pi");
+        assert_eq!(
+            mobile_agent_detail(crate::config::UiLanguage::En, &entry),
+            "  mobile-state · idle · pi"
+        );
     }
 
     #[test]
     fn mobile_agent_detail_keeps_existing_compact_detail_without_tab_context() {
         let entry = agent_entry(None, Some("pi"));
 
-        assert_eq!(mobile_agent_detail(&entry), "  idle · pi");
+        assert_eq!(
+            mobile_agent_detail(crate::config::UiLanguage::En, &entry),
+            "  idle · pi"
+        );
     }
 
     #[test]
@@ -1394,7 +1428,10 @@ mod tests {
         assert!(workspace.close_tab(removed_tab));
         workspace.active_tab = 1;
 
-        assert_eq!(mobile_tab_status(&workspace), "tab 2 · 2/2");
+        assert_eq!(
+            mobile_tab_status(crate::config::UiLanguage::En, &workspace),
+            "tab 2 · 2/2"
+        );
     }
 
     #[test]

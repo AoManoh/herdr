@@ -387,8 +387,10 @@ impl AppState {
         if inner.height < 4 || inner.width < 12 {
             return false;
         }
-        let button =
-            crate::ui::release_notes_close_button_rect(Rect::new(inner.x, inner.y, inner.width, 1));
+        let button = crate::ui::release_notes_close_button_rect(
+            Rect::new(inner.x, inner.y, inner.width, 1),
+            crate::i18n::release_text(self.ui_language).close,
+        );
         col >= button.x
             && col < button.x + button.width
             && row >= button.y
@@ -494,8 +496,10 @@ impl AppState {
         if inner.height < 4 || inner.width < 12 {
             return false;
         }
-        let button =
-            crate::ui::release_notes_close_button_rect(Rect::new(inner.x, inner.y, inner.width, 1));
+        let button = crate::ui::release_notes_close_button_rect(
+            Rect::new(inner.x, inner.y, inner.width, 1),
+            crate::i18n::release_text(self.ui_language).close,
+        );
         col >= button.x
             && col < button.x + button.width
             && row >= button.y
@@ -601,7 +605,7 @@ impl AppState {
         let actions = crate::ui::modal_stack_areas(inner, 2, 0, 1, 1)
             .actions
             .unwrap_or_default();
-        let button = crate::ui::onboarding_welcome_continue_rect(actions);
+        let button = crate::ui::onboarding_welcome_continue_rect(actions, self.ui_language);
         if modal_action_from_buttons(mouse.column, mouse.row, &[(button, ModalAction::Continue)])
             == Some(ModalAction::Continue)
         {
@@ -624,8 +628,16 @@ impl AppState {
         if inner.height < 4 || inner.width < 12 {
             return false;
         }
-        let button =
-            crate::ui::release_notes_close_button_rect(Rect::new(inner.x, inner.y, inner.width, 1));
+        let t = crate::i18n::help_text(self.ui_language);
+        let label = if self.keybind_help.search_focused {
+            t.back
+        } else {
+            t.close
+        };
+        let button = crate::ui::release_notes_close_button_rect(
+            Rect::new(inner.x, inner.y, inner.width, 1),
+            label,
+        );
         col >= button.x
             && col < button.x + button.width
             && row >= button.y
@@ -727,8 +739,10 @@ mod tests {
             rect.width.saturating_sub(2),
             rect.height.saturating_sub(2),
         );
-        let close =
-            crate::ui::release_notes_close_button_rect(Rect::new(inner.x, inner.y, inner.width, 1));
+        let close = crate::ui::release_notes_close_button_rect(
+            Rect::new(inner.x, inner.y, inner.width, 1),
+            crate::i18n::help_text(app.state.ui_language).close,
+        );
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             close.x,
@@ -752,8 +766,10 @@ mod tests {
             rect.width.saturating_sub(2),
             rect.height.saturating_sub(2),
         );
-        let back =
-            crate::ui::release_notes_close_button_rect(Rect::new(inner.x, inner.y, inner.width, 1));
+        let back = crate::ui::release_notes_close_button_rect(
+            Rect::new(inner.x, inner.y, inner.width, 1),
+            crate::i18n::help_text(app.state.ui_language).back,
+        );
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             back.x,
@@ -786,7 +802,8 @@ mod tests {
         let actions = crate::ui::modal_stack_areas(inner, 2, 0, 1, 1)
             .actions
             .unwrap();
-        let continue_rect = crate::ui::onboarding_welcome_continue_rect(actions);
+        let continue_rect =
+            crate::ui::onboarding_welcome_continue_rect(actions, app.state.ui_language);
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             continue_rect.x,

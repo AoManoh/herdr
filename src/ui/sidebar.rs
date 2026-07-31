@@ -78,15 +78,23 @@ pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32) -> Rect
     Rect::new(content.x, content.y + ws_h, content.width, 1)
 }
 
-fn agent_panel_sort_label(sort: AgentPanelSort) -> &'static str {
+fn agent_panel_sort_label(
+    language: crate::config::UiLanguage,
+    sort: AgentPanelSort,
+) -> &'static str {
+    let t = crate::i18n::sidebar_text(language);
     match sort {
-        AgentPanelSort::Spaces => "grouped",
-        AgentPanelSort::Priority => "priority",
+        AgentPanelSort::Spaces => t.grouped,
+        AgentPanelSort::Priority => t.priority,
     }
 }
 
-pub(crate) fn agent_panel_toggle_rect(area: Rect, sort: AgentPanelSort) -> Rect {
-    agent_panel_header_label_rect(area, agent_panel_sort_label(sort))
+pub(crate) fn agent_panel_toggle_rect(
+    area: Rect,
+    language: crate::config::UiLanguage,
+    sort: AgentPanelSort,
+) -> Rect {
+    agent_panel_header_label_rect(area, agent_panel_sort_label(language, sort))
 }
 
 fn agent_panel_header_label_rect(area: Rect, label: &str) -> Rect {
@@ -104,9 +112,11 @@ fn agent_panel_header_label_rect(area: Rect, label: &str) -> Rect {
 }
 
 fn active_agent_view_label(app: &AppState) -> Option<&str> {
-    app.agent_view_override
-        .as_ref()
-        .map(|view| view.label.as_deref().unwrap_or("filtered"))
+    app.agent_view_override.as_ref().map(|view| {
+        view.label
+            .as_deref()
+            .unwrap_or(crate::i18n::sidebar_text(app.ui_language).filtered)
+    })
 }
 
 pub(crate) fn agent_panel_entries(app: &AppState) -> Vec<AgentPanelEntry> {
@@ -210,7 +220,7 @@ fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indent
         SpaceTokenContext {
             workspace: &label,
             branch: ws.branch().as_deref(),
-            state_text: state_label(state, seen),
+            state_text: state_label(app.ui_language, state, seen),
             ahead_behind: ws.git_ahead_behind(),
             tokens: &token_values,
             suppress_git_details: indented,
@@ -554,7 +564,7 @@ fn resolved_agent_rows(app: &AppState, entry: &AgentPanelEntry) -> Vec<Vec<Resol
         .state_labels
         .get(agent_panel_status_key(entry.state, entry.seen))
         .map(String::as_str)
-        .unwrap_or_else(|| state_label(entry.state, entry.seen));
+        .unwrap_or_else(|| state_label(app.ui_language, entry.state, entry.seen));
     tokens::agent_rows(&app.sidebar_agents, entry, label)
 }
 
@@ -1193,6 +1203,7 @@ fn render_workspace_list(
     is_navigating: bool,
 ) {
     let p = &app.palette;
+    let t = crate::i18n::sidebar_text(app.ui_language);
     let dragged_ws_idx = match app.drag.as_ref().map(|drag| &drag.target) {
         Some(crate::app::state::DragTarget::WorkspaceReorder { source_ws_idx, .. }) => {
             Some(*source_ws_idx)
@@ -1211,7 +1222,7 @@ fn render_workspace_list(
     if area.height > 0 {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                " spaces",
+                t.spaces,
                 Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD),
             )])),
             Rect::new(area.x, area.y, area.width, 1),
@@ -1298,7 +1309,7 @@ fn render_workspace_list(
             SpaceTokenContext {
                 workspace: &display_label,
                 branch: ws.branch().as_deref(),
-                state_text: state_label(display_state, display_seen),
+                state_text: state_label(app.ui_language, display_state, display_seen),
                 ahead_behind: ws.git_ahead_behind(),
                 tokens: &token_values,
                 suppress_git_details: card.indented,
@@ -1385,7 +1396,7 @@ fn render_workspace_list(
     if app.mouse_capture && list_bottom > area.y {
         let new_rect = app.sidebar_new_button_rect();
         frame.render_widget(
-            Paragraph::new(Span::styled(" new", Style::default().fg(p.overlay0))),
+            Paragraph::new(Span::styled(t.new, Style::default().fg(p.overlay0))),
             new_rect,
         );
 
@@ -1396,10 +1407,10 @@ fn render_workspace_list(
                     "● ",
                     Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("menu", Style::default().fg(p.overlay0)),
+                Span::styled(t.menu, Style::default().fg(p.overlay0)),
             ])
         } else {
-            Line::from(vec![Span::styled("menu", Style::default().fg(p.overlay0))])
+            Line::from(vec![Span::styled(t.menu, Style::default().fg(p.overlay0))])
         };
         frame.render_widget(
             Paragraph::new(menu_line).alignment(Alignment::Right),
@@ -1415,6 +1426,7 @@ fn render_agent_detail(
     area: Rect,
 ) {
     let p = &app.palette;
+    let t = crate::i18n::sidebar_text(app.ui_language);
 
     if area.height < 3 {
         return;
@@ -1428,13 +1440,13 @@ fn render_agent_detail(
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
-            " agents",
+            t.agents,
             Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD),
         )])),
         Rect::new(area.x, area.y + 1, area.width, 1),
     );
     let control_label = active_agent_view_label(app)
-        .unwrap_or_else(|| agent_panel_sort_label(app.agent_panel_sort));
+        .unwrap_or_else(|| agent_panel_sort_label(app.ui_language, app.agent_panel_sort));
     let toggle_rect = agent_panel_header_label_rect(area, control_label);
     if toggle_rect != Rect::default() {
         let color = if app.agent_view_override.is_some() {
@@ -1461,7 +1473,7 @@ fn render_agent_detail(
     }
     if details.is_empty() && app.agent_view_override.is_some() {
         frame.render_widget(
-            Paragraph::new(" no matching agents")
+            Paragraph::new(t.no_matching_agents)
                 .style(Style::default().fg(p.overlay0).add_modifier(Modifier::DIM)),
             Rect::new(body.x, body.y, body.width, 1),
         );

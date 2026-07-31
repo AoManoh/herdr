@@ -351,7 +351,9 @@ impl AppState {
             } else {
                 0
             };
-            let width = section.label().len() as u16 + 2 + badge_width;
+            let width = crate::ui::text::display_width_u16(section.label(self.ui_language))
+                + 2
+                + badge_width;
             if col >= x && col < x + width {
                 return Some(*section);
             }
@@ -462,8 +464,12 @@ impl AppState {
 
                 let inner = self.settings_inner_rect();
                 let show_primary = crate::ui::settings_show_primary_action(self);
-                let (apply, close) =
-                    crate::ui::settings_button_rects(inner, self.settings.section, show_primary);
+                let (apply, close) = crate::ui::settings_button_rects(
+                    inner,
+                    self.ui_language,
+                    self.settings.section,
+                    show_primary,
+                );
                 let mut buttons = vec![(close, super::modal::ModalAction::Close)];
                 if let Some(apply) = apply {
                     buttons.insert(0, (apply, super::modal::ModalAction::Apply));
@@ -742,10 +748,14 @@ mod tests {
                     } else {
                         0
                     };
-                    section.label().len() as u16 + 3 + badge_width
+                    crate::ui::text::display_width_u16(section.label(state.ui_language))
+                        + 3
+                        + badge_width
                 })
                 .sum::<u16>();
-        let dotted_width = SettingsSection::Integrations.label().len() as u16 + 4;
+        let dotted_width = crate::ui::text::display_width_u16(
+            SettingsSection::Integrations.label(state.ui_language),
+        ) + 4;
 
         assert_eq!(
             state.settings_tab_at(integrations_x + dotted_width - 1, tab_y),

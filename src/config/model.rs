@@ -123,6 +123,15 @@ pub enum SidebarCollapsedModeConfig {
     Hidden,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UiLanguage {
+    #[default]
+    En,
+    #[serde(alias = "zh-CN")]
+    ZhCn,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RightClickPassthroughModifierConfig(Option<KeyModifiers>);
 
@@ -775,6 +784,8 @@ pub struct WorktreesConfig {
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
+    /// TUI display language. Accepted values: "en" and "zh-cn". Default: "en".
+    pub language: UiLanguage,
     pub sidebar_width: u16,
     /// Minimum sidebar width (columns) when expanded. Default: 18.
     pub sidebar_min_width: u16,
@@ -995,6 +1006,7 @@ impl Default for WorktreesConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
+            language: UiLanguage::En,
             sidebar_width: 26,
             sidebar_min_width: 18,
             sidebar_max_width: 36,
@@ -1111,6 +1123,25 @@ impl Default for AdvancedConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_language_defaults_and_parses_supported_values() {
+        assert_eq!(Config::default().ui.language, UiLanguage::En);
+
+        let zh_cn: Config = toml::from_str("[ui]\nlanguage = \"zh-cn\"").unwrap();
+        assert_eq!(zh_cn.ui.language, UiLanguage::ZhCn);
+
+        let zh_cn_alias: Config = toml::from_str("[ui]\nlanguage = \"zh-CN\"").unwrap();
+        assert_eq!(zh_cn_alias.ui.language, UiLanguage::ZhCn);
+
+        let english: Config = toml::from_str("[ui]\nlanguage = \"en\"").unwrap();
+        assert_eq!(english.ui.language, UiLanguage::En);
+    }
+
+    #[test]
+    fn ui_language_rejects_unsupported_values() {
+        assert!(toml::from_str::<Config>("[ui]\nlanguage = \"auto\"").is_err());
+    }
 
     #[test]
     fn update_config_defaults_and_parses() {

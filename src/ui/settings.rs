@@ -36,6 +36,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
     use crate::app::state::SettingsSection;
 
     let p = &app.palette;
+    let t = crate::i18n::settings_text(app.ui_language);
     let Some(popup) = centered_popup_rect(area, SETTINGS_POPUP_WIDTH, settings_popup_height(app))
     else {
         return;
@@ -60,7 +61,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
-            " settings",
+            t.title,
             Style::default().fg(p.text).add_modifier(Modifier::BOLD),
         )])),
         header_rows[0],
@@ -73,10 +74,10 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                     "● ",
                     Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(section.label()),
+                Span::raw(section.label(app.ui_language)),
             ])
         } else {
-            Line::from(section.label())
+            Line::from(section.label(app.ui_language))
         }
     });
     let tabs = Tabs::new(tab_labels)
@@ -114,8 +115,9 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                 frame,
                 content_area,
                 p,
-                "sound alerts",
-                "play sounds when agents change state in background",
+                app.ui_language,
+                t.sound_alerts,
+                t.sound_description,
                 app.sound_enabled(),
                 app.settings.list.selected,
             );
@@ -124,13 +126,13 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
             render_modal_choice_list(
                 frame,
                 content_area,
-                "notification popups",
-                "choose where background popup notifications should appear",
+                t.notification_popups,
+                t.notification_description,
                 &[
-                    ("off", ToastDelivery::Off),
-                    ("inside herdr", ToastDelivery::Herdr),
-                    ("via terminal", ToastDelivery::Terminal),
-                    ("via system", ToastDelivery::System),
+                    (t.off, ToastDelivery::Off),
+                    (t.inside_herdr, ToastDelivery::Herdr),
+                    (t.via_terminal, ToastDelivery::Terminal),
+                    (t.via_system, ToastDelivery::System),
                 ],
                 app.toast_delivery(),
                 app.settings.list.selected,
@@ -143,8 +145,9 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                 frame,
                 content_area,
                 p,
-                "agent border labels",
-                "show detected agent names in split pane borders",
+                app.ui_language,
+                t.agent_border_labels,
+                t.agent_border_description,
                 app.agent_border_labels_enabled(),
                 app.settings.list.selected,
             );
@@ -160,10 +163,10 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
     if let Some(footer_area) = stack.footer {
         let footer_rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)])
             .areas::<2>(footer_area);
-        let primary_label = settings_primary_button_label(app.settings.section);
+        let primary_label = settings_primary_button_label(app.ui_language, app.settings.section);
         let show_primary = settings_show_primary_action(app);
         let (apply_rect, close_rect) =
-            settings_button_rects(inner, app.settings.section, show_primary);
+            settings_button_rects(inner, app.ui_language, app.settings.section, show_primary);
         if let Some(apply_rect) = apply_rect {
             render_action_button(
                 frame,
@@ -180,7 +183,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
             frame,
             close_rect,
             Some("esc"),
-            "close",
+            t.close,
             Style::default()
                 .fg(p.text)
                 .bg(p.surface0)
@@ -190,9 +193,9 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(" ↑↓", Style::default().fg(p.overlay0)),
-                Span::styled(" select  ", Style::default().fg(p.overlay1)),
+                Span::styled(t.select, Style::default().fg(p.overlay1)),
                 Span::styled("tab", Style::default().fg(p.overlay0)),
-                Span::styled(" section", Style::default().fg(p.overlay1)),
+                Span::styled(t.section, Style::default().fg(p.overlay1)),
             ])),
             footer_rows[0],
         );
@@ -200,11 +203,13 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
 }
 
 pub(crate) fn settings_primary_button_label(
+    language: crate::config::UiLanguage,
     section: crate::app::state::SettingsSection,
 ) -> &'static str {
+    let t = crate::i18n::settings_text(language);
     match section {
-        crate::app::state::SettingsSection::Integrations => "install",
-        _ => "apply",
+        crate::app::state::SettingsSection::Integrations => t.install,
+        _ => t.apply,
     }
 }
 
@@ -220,15 +225,17 @@ pub(crate) fn settings_show_primary_action(app: &AppState) -> bool {
 
 pub(crate) fn settings_button_rects(
     inner: Rect,
+    language: crate::config::UiLanguage,
     section: crate::app::state::SettingsSection,
     show_primary: bool,
 ) -> (Option<Rect>, Rect) {
+    let t = crate::i18n::settings_text(language);
     if !show_primary {
         let rects = action_button_row_rects(
             inner,
             &[ActionButtonSpec {
                 hint: Some("esc"),
-                label: "close",
+                label: t.close,
             }],
             2,
             inner.height.saturating_sub(1),
@@ -241,11 +248,11 @@ pub(crate) fn settings_button_rects(
         &[
             ActionButtonSpec {
                 hint: Some("↵"),
-                label: settings_primary_button_label(section),
+                label: settings_primary_button_label(language, section),
             },
             ActionButtonSpec {
                 hint: Some("esc"),
-                label: "close",
+                label: t.close,
             },
         ],
         2,
@@ -256,6 +263,7 @@ pub(crate) fn settings_button_rects(
 
 fn integrations_footer_paragraph(app: &AppState) -> Paragraph<'static> {
     let p = &app.palette;
+    let t = crate::i18n::settings_text(app.ui_language);
     let mut footer_lines = Vec::new();
     if !app.integration_install_messages.is_empty() {
         for message in &app.integration_install_messages {
@@ -273,11 +281,11 @@ fn integrations_footer_paragraph(app: &AppState) -> Paragraph<'static> {
             .iter()
             .any(crate::integration::IntegrationRecommendation::needs_install)
         {
-            " press install to add available or outdated integrations"
+            t.install_hint
         } else if found_any {
-            " all detected integrations are installed"
+            t.all_installed
         } else {
-            " no supported agent CLIs found on PATH"
+            t.no_agent_clis
         };
         footer_lines.push(Line::from(Span::styled(
             hint.to_string(),
@@ -293,6 +301,7 @@ fn integrations_footer_height(app: &AppState, width: u16) -> u16 {
 
 fn render_settings_integrations(app: &AppState, frame: &mut Frame, area: Rect) {
     let p = &app.palette;
+    let t = crate::i18n::settings_text(app.ui_language);
 
     let footer = integrations_footer_paragraph(app);
     let footer_height = integrations_footer_height(app, area.width);
@@ -308,16 +317,14 @@ fn render_settings_integrations(app: &AppState, frame: &mut Frame, area: Rect) {
     .areas::<6>(area);
 
     frame.render_widget(
-        Paragraph::new("agent integrations")
+        Paragraph::new(t.agent_integrations)
             .style(Style::default().fg(p.text).add_modifier(Modifier::BOLD)),
         rows[0],
     );
     frame.render_widget(
-        Paragraph::new(
-            "let agents report state directly instead of relying only on process detection",
-        )
-        .style(Style::default().fg(p.overlay1))
-        .wrap(ratatui::widgets::Wrap { trim: false }),
+        Paragraph::new(t.integrations_description)
+            .style(Style::default().fg(p.overlay1))
+            .wrap(ratatui::widgets::Wrap { trim: false }),
         rows[1],
     );
 
@@ -345,13 +352,16 @@ fn render_settings_integrations(app: &AppState, frame: &mut Frame, area: Rect) {
                 format!("{:<9}", item.label),
                 Style::default().fg(p.subtext0),
             ),
-            Span::styled(item.status_label(), Style::default().fg(p.overlay1)),
+            Span::styled(
+                item.status_label(app.ui_language),
+                Style::default().fg(p.overlay1),
+            ),
         ]));
     }
 
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
-            " no integration targets available",
+            t.no_integration_targets,
             Style::default().fg(p.overlay1),
         )));
     }
@@ -395,6 +405,7 @@ fn render_settings_toggle(
     frame: &mut Frame,
     area: Rect,
     p: &Palette,
+    language: crate::config::UiLanguage,
     title: &str,
     description: &str,
     current_value: bool,
@@ -405,7 +416,10 @@ fn render_settings_toggle(
         area,
         title,
         description,
-        &[("on", true), ("off", false)],
+        &[
+            (crate::i18n::settings_text(language).on, true),
+            (crate::i18n::settings_text(language).off, false),
+        ],
         current_value,
         selected_idx,
         p,
@@ -415,6 +429,7 @@ fn render_settings_toggle(
 
 fn render_settings_experiments(app: &AppState, frame: &mut Frame, area: Rect) {
     let p = &app.palette;
+    let t = crate::i18n::settings_text(app.ui_language);
     let [desc_area, _, list_area] = Layout::vertical([
         Constraint::Length(2),
         Constraint::Length(1),
@@ -425,7 +440,7 @@ fn render_settings_experiments(app: &AppState, frame: &mut Frame, area: Rect) {
     super::widgets::render_modal_description(
         frame,
         desc_area,
-        "optional features that are off by default",
+        t.optional_features,
         Style::default().fg(p.overlay1),
     );
 
@@ -441,7 +456,7 @@ fn render_settings_experiments(app: &AppState, frame: &mut Frame, area: Rect) {
         };
         let row = Rect::new(list_area.x, list_area.y + idx as u16, list_area.width, 1);
         frame.render_widget(
-            Paragraph::new(format!(" {} {marker}", setting.label())).style(style),
+            Paragraph::new(format!(" {} {marker}", setting.label(app.ui_language))).style(style),
             row,
         );
     }
@@ -452,6 +467,32 @@ mod tests {
     use super::*;
     use crate::app::{state::SettingsSection, Mode};
     use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn settings_overlay_renders_simplified_chinese() {
+        let mut app = AppState::test_new();
+        app.ui_language = crate::config::UiLanguage::ZhCn;
+        app.settings.section = SettingsSection::Sound;
+        app.mode = Mode::Settings;
+
+        let mut terminal =
+            Terminal::new(TestBackend::new(80, 24)).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_settings_overlay(&app, frame, Rect::new(0, 0, 80, 24)))
+            .expect("settings overlay should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("声 音 提 醒"), "rendered: {rendered:?}");
+        assert!(rendered.contains("应 用"), "rendered: {rendered:?}");
+        assert!(!rendered.contains("sound alerts"), "rendered: {rendered:?}");
+    }
 
     #[test]
     fn experiments_pane_history_uses_settings_checkmark_marker() {

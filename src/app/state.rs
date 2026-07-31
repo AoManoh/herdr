@@ -664,15 +664,16 @@ impl WorktreeOpenEntry {
         })
     }
 
-    pub(crate) fn status_label(&self) -> &'static str {
-        if self.already_open_ws_idx.is_some() {
-            "open"
-        } else if self.branch.is_some() {
-            ""
-        } else if self.is_linked_worktree {
-            "detached"
-        } else {
-            "root"
+    pub(crate) fn status_label(&self, language: crate::config::UiLanguage) -> &'static str {
+        match language {
+            crate::config::UiLanguage::En if self.already_open_ws_idx.is_some() => "open",
+            crate::config::UiLanguage::En if self.branch.is_some() => "",
+            crate::config::UiLanguage::En if self.is_linked_worktree => "detached",
+            crate::config::UiLanguage::En => "root",
+            crate::config::UiLanguage::ZhCn if self.already_open_ws_idx.is_some() => "已打开",
+            crate::config::UiLanguage::ZhCn if self.branch.is_some() => "",
+            crate::config::UiLanguage::ZhCn if self.is_linked_worktree => "分离状态",
+            crate::config::UiLanguage::ZhCn => "根目录",
         }
     }
 
@@ -685,7 +686,7 @@ impl WorktreeOpenEntry {
                 .and_then(|name| name.to_str())
                 .unwrap_or_default(),
             self.path.display(),
-            self.status_label()
+            self.status_label(crate::config::UiLanguage::En)
         )
         .to_lowercase()
     }
@@ -1006,15 +1007,8 @@ impl SettingsSection {
         Self::Experiments,
     ];
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Theme => "theme",
-            Self::Sound => "sound",
-            Self::Toast => "toasts",
-            Self::PaneLabels => "pane labels",
-            Self::Experiments => "experiments",
-            Self::Integrations => "integrations",
-        }
+    pub fn label(self, language: crate::config::UiLanguage) -> &'static str {
+        crate::i18n::settings_section_label(language, self)
     }
 }
 
@@ -1027,13 +1021,8 @@ pub(crate) enum ExperimentSetting {
 impl ExperimentSetting {
     pub(crate) const ALL: [Self; 2] = [Self::PaneHistory, Self::SwitchAsciiInputSourceInPrefix];
 
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::PaneHistory => "pane screen history",
-            Self::SwitchAsciiInputSourceInPrefix => {
-                "switch to ascii input source in prefix (macOS/Windows)"
-            }
-        }
+    pub(crate) fn label(self, language: crate::config::UiLanguage) -> &'static str {
+        crate::i18n::experiment_label(language, self)
     }
 
     pub(crate) fn enabled(self, state: &AppState) -> bool {
@@ -1228,6 +1217,35 @@ pub enum ContextMenuKind {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GlobalMenuAction {
+    Detach,
+    WhatsNew,
+    Keybinds,
+    ReloadConfig,
+    Settings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ContextMenuAction {
+    Rename,
+    Close,
+    CloseGroup,
+    NewWorktree,
+    OpenWorktree,
+    DeleteWorktreeCheckout,
+    Collapse,
+    Expand,
+    NewTab,
+    RenamePane,
+    ClearPaneName,
+    SwapWithFocusedPane,
+    SplitRight,
+    SplitDown,
+    Zoom,
+    ClosePane,
+}
+
 /// Right-click context menu state.
 pub struct ContextMenuState {
     pub kind: ContextMenuKind,
@@ -1237,91 +1255,75 @@ pub struct ContextMenuState {
 }
 
 impl ContextMenuState {
-    pub fn items(&self) -> &'static [&'static str] {
+    pub(crate) fn actions(&self) -> &'static [ContextMenuAction] {
+        use ContextMenuAction::*;
+
         match self.kind {
-            ContextMenuKind::Workspace { .. } => &["Rename", "Close"],
+            ContextMenuKind::Workspace { .. } => &[Rename, Close],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
-            } => &["Rename", "Close", "New worktree", "Open worktree..."],
+            } => &[Rename, Close, NewWorktree, OpenWorktree],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: true,
                 ..
-            } => &["Rename", "Close", "Delete worktree checkout..."],
+            } => &[Rename, Close, DeleteWorktreeCheckout],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: true,
                 collapsed: true,
                 ..
-            } => &[
-                "Rename",
-                "Close group",
-                "New worktree",
-                "Open worktree...",
-                "Expand",
-            ],
+            } => &[Rename, CloseGroup, NewWorktree, OpenWorktree, Expand],
             ContextMenuKind::GitWorkspace {
                 is_linked_worktree: false,
                 has_worktree_children: true,
                 collapsed: false,
                 ..
-            } => &[
-                "Rename",
-                "Close group",
-                "New worktree",
-                "Open worktree...",
-                "Collapse",
-            ],
-            ContextMenuKind::Tab { .. } => &["New tab", "Rename", "Close"],
+            } => &[Rename, CloseGroup, NewWorktree, OpenWorktree, Collapse],
+            ContextMenuKind::Tab { .. } => &[NewTab, Rename, Close],
             ContextMenuKind::Pane {
                 has_manual_label: true,
                 source_pane_id: Some(_),
                 ..
             } => &[
-                "Rename pane",
-                "Clear pane name",
-                "Swap with focused pane",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
+                RenamePane,
+                ClearPaneName,
+                SwapWithFocusedPane,
+                SplitRight,
+                SplitDown,
+                Zoom,
+                ClosePane,
             ],
             ContextMenuKind::Pane {
                 has_manual_label: false,
                 source_pane_id: Some(_),
                 ..
             } => &[
-                "Rename pane",
-                "Swap with focused pane",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
+                RenamePane,
+                SwapWithFocusedPane,
+                SplitRight,
+                SplitDown,
+                Zoom,
+                ClosePane,
             ],
             ContextMenuKind::Pane {
                 has_manual_label: true,
                 source_pane_id: None,
                 ..
             } => &[
-                "Rename pane",
-                "Clear pane name",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
+                RenamePane,
+                ClearPaneName,
+                SplitRight,
+                SplitDown,
+                Zoom,
+                ClosePane,
             ],
             ContextMenuKind::Pane {
                 has_manual_label: false,
                 source_pane_id: None,
                 ..
-            } => &[
-                "Rename pane",
-                "Split right",
-                "Split down",
-                "Zoom",
-                "Close pane",
-            ],
+            } => &[RenamePane, SplitRight, SplitDown, Zoom, ClosePane],
         }
     }
 }
@@ -1491,6 +1493,7 @@ pub struct AppState {
     /// None means unsupported or not yet reported, which preserves active-pane suppression.
     pub outer_terminal_focus: Option<bool>,
     // Config
+    pub ui_language: crate::config::UiLanguage,
     pub prefix_code: KeyCode,
     pub prefix_mods: KeyModifiers,
     pub default_sidebar_width: u16,
@@ -1647,13 +1650,26 @@ impl AppState {
         self.agent_manifest_summaries = crate::detect::manifest::manifest_summaries();
     }
 
+    pub(crate) fn global_menu_actions(&self) -> Vec<GlobalMenuAction> {
+        let mut actions = vec![
+            GlobalMenuAction::Settings,
+            GlobalMenuAction::Keybinds,
+            GlobalMenuAction::ReloadConfig,
+        ];
+        if self.update_available.is_some() || self.latest_release_notes_available {
+            actions.push(GlobalMenuAction::WhatsNew);
+        }
+        actions.push(GlobalMenuAction::Detach);
+        actions
+    }
+
     pub(crate) fn global_menu_attention_badge_visible(&self) -> bool {
         self.update_available.is_some() || self.integration_updates_available()
     }
 
-    pub(crate) fn global_menu_item_has_badge(&self, item: &str) -> bool {
-        (item == "update ready" && self.update_available.is_some())
-            || (item == "settings" && self.integration_updates_available())
+    pub(crate) fn global_menu_action_has_badge(&self, action: GlobalMenuAction) -> bool {
+        matches!(action, GlobalMenuAction::WhatsNew) && self.update_available.is_some()
+            || matches!(action, GlobalMenuAction::Settings) && self.integration_updates_available()
     }
 
     pub(crate) fn settings_section_has_badge(&self, section: SettingsSection) -> bool {
@@ -1869,6 +1885,7 @@ impl AppState {
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
+            ui_language: crate::config::UiLanguage::En,
             prefix_code: KeyCode::Char('b'),
             prefix_mods: KeyModifiers::CONTROL,
             default_sidebar_width: 26,
@@ -2477,8 +2494,12 @@ mod tests {
         };
 
         assert_eq!(
-            menu.items(),
-            &["Rename", "Close", "Delete worktree checkout..."]
+            menu.actions(),
+            &[
+                ContextMenuAction::Rename,
+                ContextMenuAction::Close,
+                ContextMenuAction::DeleteWorktreeCheckout,
+            ]
         );
     }
 
@@ -2497,8 +2518,13 @@ mod tests {
         };
 
         assert_eq!(
-            menu.items(),
-            &["Rename", "Close", "New worktree", "Open worktree..."]
+            menu.actions(),
+            &[
+                ContextMenuAction::Rename,
+                ContextMenuAction::Close,
+                ContextMenuAction::NewWorktree,
+                ContextMenuAction::OpenWorktree,
+            ]
         );
     }
 
@@ -2517,13 +2543,13 @@ mod tests {
         };
 
         assert_eq!(
-            menu.items(),
+            menu.actions(),
             &[
-                "Rename",
-                "Close group",
-                "New worktree",
-                "Open worktree...",
-                "Collapse"
+                ContextMenuAction::Rename,
+                ContextMenuAction::CloseGroup,
+                ContextMenuAction::NewWorktree,
+                ContextMenuAction::OpenWorktree,
+                ContextMenuAction::Collapse,
             ]
         );
     }
