@@ -1,0 +1,339 @@
+name: Chinese Fork Release
+
+on:
+  push:
+    tags:
+      - "zh-v*"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RUST_TOOLCHAIN_VERSION: 1.96.1
+
+concurrency:
+  group: chinese-fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      base_version: ${{ steps.plan.outputs.base_version }}
+      revision: ${{ steps.plan.outputs.revision }}
+      build_id: ${{ steps.plan.outputs.build_id }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate fork release tag
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          prefix="zh-v${base_version}."
+          case "$GITHUB_REF_NAME" in
+            "$prefix"*) revision="${GITHUB_REF_NAME#"$prefix"}" ;;
+            *)
+              echo "error: tag must match ${prefix}<revision>" >&2
+              exit 1
+              ;;
+          esac
+          case "$revision" in
+            ''|*[!0-9]*)
+              echo "error: Chinese fork revision must be numeric" >&2
+              exit 1
+              ;;
+          esac
+          {
+            echo "base_version=$base_version"
+            echo "revision=$revision"
+            echo "build_id=zh.$revision"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          components: rustfmt,clippy
+
+      - name: Install Rust tools
+        uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+        with:
+          tool: just,cargo-nextest
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: chinese-fork-verify
+
+      - name: Run project checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if just check; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Project checks hit a transient failure; retrying complete check ($attempt/3)."
+              sleep $((attempt * 3))
+            fi
+          done
+          exit 1
+
+  build:
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            name: herdr-linux-x86_64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            name: herdr-linux-aarch64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: herdr-macos-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: herdr-macos-aarch64
+    env:
+      HERDR_BUILD_CHANNEL: fork
+      HERDR_BUILD_ID: ${{ needs.verify.outputs.build_id }}
+      HERDR_BUILD_COMMIT: ${{ github.sha }}
+      LIBGHOSTTY_VT_OPTIMIZE: ReleaseFast
+      LIBGHOSTTY_VT_SIMD: 'true'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Install Zig
+        if: runner.os != 'macOS'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      - name: Restore Homebrew Zig cache
+        if: runner.os == 'macOS'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/Library/Caches/Homebrew/downloads
+          key: chinese-fork-homebrew-zig-0.15-${{ runner.os }}-${{ runner.arch }}
+          restore-keys: |
+            chinese-fork-homebrew-zig-0.15-${{ runner.os }}-
+
+      - name: Install Zig on macOS
+        if: runner.os == 'macOS'
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install zig@0.15
+          echo "$(brew --prefix zig@0.15)/bin" >> "$GITHUB_PATH"
+          "$(brew --prefix zig@0.15)/bin/zig" version
+
+      - name: Prefer official Ubuntu mirrors
+        if: runner.os == 'Linux'
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure.archive.ubuntu.com/d' /etc/apt/apt-mirrors.txt
+            cat /etc/apt/apt-mirrors.txt
+          fi
+
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo find /etc/apt/sources.list.d -type f \( -iname '*microsoft*' -o -iname '*azure-cli*' \) -print -delete
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build musl-tools gcc-aarch64-linux-gnu crossbuild-essential-arm64
+
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install cmake ninja
+
+      - name: Set Linux aarch64 linker
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: chinese-fork-release-${{ matrix.target }}
+
+      - name: Remove Zig build caches
+        run: rm -rf .zig-cache vendor/libghostty-vt/.zig-cache vendor/libghostty-vt/zig-out
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package and verify artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp target/${{ matrix.target }}/release/herdr ${{ matrix.name }}
+          chmod 0755 ${{ matrix.name }}
+          ./${{ matrix.name }} --version | tee VERSION.txt
+          file ${{ matrix.name }} | tee BUILD_INFO.txt
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            ldd ${{ matrix.name }} > LDD_INFO.txt 2>&1 || true
+            cat LDD_INFO.txt >> BUILD_INFO.txt
+            grep -Eq "statically linked|not a dynamic executable" LDD_INFO.txt
+            if nm -u ${{ matrix.name }} 2>/dev/null | grep -E '(__cxa|GLIBCXX|CXXABI|_ZSt)'; then
+              echo "error: Linux artifact has unresolved C++ runtime symbols" >&2
+              exit 1
+            fi
+          fi
+          python3 - <<'PY' > ${{ matrix.name }}.sha256
+          import hashlib, pathlib
+          path = pathlib.Path("${{ matrix.name }}")
+          print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
+          PY
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "tag=$GITHUB_REF_NAME"
+            echo "target=${{ matrix.target }}"
+            echo "channel=fork"
+            echo "build_id=${{ needs.verify.outputs.build_id }}"
+          } >> BUILD_INFO.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            ${{ matrix.name }}
+            ${{ matrix.name }}.sha256
+            BUILD_INFO.txt
+            VERSION.txt
+
+  publish:
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: artifacts
+
+      - name: Assemble release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for name in \
+            herdr-linux-x86_64 \
+            herdr-linux-aarch64 \
+            herdr-macos-x86_64 \
+            herdr-macos-aarch64
+          do
+            cp "artifacts/$name/$name" "dist/$name"
+            chmod 0755 "dist/$name"
+          done
+          cp install.sh dist/install.sh
+          chmod 0755 dist/install.sh
+          (
+            cd dist
+            sha256sum herdr-* install.sh > checksums.txt
+          )
+          sh -n dist/install.sh
+          dist/herdr-linux-x86_64 --version | grep -F "${{ needs.verify.outputs.base_version }}-fork.${{ needs.verify.outputs.build_id }}"
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > RELEASE_NOTES.md <<'EOF'
+          ## herdr 简体中文维护版
+
+          本版本由 `AoManoh/herdr` 维护，提供可切换的 English / 简体中文 TUI、设置面板语言选择、中文显示宽度和鼠标命中修正。
+
+          ### 一键安装或升级
+
+          ```bash
+          curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh | sh
+          ```
+
+          安装器会自动识别 Linux/macOS 与 x86_64/aarch64，校验 SHA-256，并在默认 Herdr session 运行时尝试 live-handoff。运行中的命名 session 不会被自动覆盖。
+
+          ### 注意
+
+          该 fork 的发布渠道独立于官方 `herdrdev/herdr`。请使用上面的安装命令升级，不要运行官方 `herdr update`。
+          EOF
+          printf '\n- Tag: %s\n- Commit: %s\n' "$GITHUB_REF_NAME" "$GITHUB_SHA" >> RELEASE_NOTES.md
+
+      - name: Create Chinese fork release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        with:
+          name: herdr 简体中文 ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          make_latest: true
+          prerelease: false
+          files: |
+            dist/herdr-linux-x86_64
+            dist/herdr-linux-aarch64
+            dist/herdr-macos-x86_64
+            dist/herdr-macos-aarch64
+            dist/checksums.txt
+            dist/install.sh
+
+  verify-install:
+    needs: [verify, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download published installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/install.sh"
+          for attempt in 1 2 3 4 5; do
+            if curl -fsSL "$url" -o "$RUNNER_TEMP/install.sh"; then
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          exit 1
+
+      - name: Verify one-line installation path
+        shell: bash
+        env:
+          HERDR_REPO: ${{ github.repository }}
+          HERDR_VERSION: ${{ github.ref_name }}
+          HERDR_INSTALL_DIR: ${{ runner.temp }}/bin
+        run: |
+          set -euo pipefail
+          sh "$RUNNER_TEMP/install.sh"
+          "$HERDR_INSTALL_DIR/herdr" --version | grep -F "${{ needs.verify.outputs.base_version }}-fork.${{ needs.verify.outputs.build_id }}"
+          "$HERDR_INSTALL_DIR/herdr" config check
