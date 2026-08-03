@@ -169,7 +169,7 @@ jobs:
         run: |
           sudo find /etc/apt/sources.list.d -type f \( -iname '*microsoft*' -o -iname '*azure-cli*' \) -print -delete
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build musl-tools gcc-aarch64-linux-gnu crossbuild-essential-arm64
+          sudo apt-get install -y cmake ninja-build musl-tools gcc-aarch64-linux-gnu crossbuild-essential-arm64 qemu-user-static
 
       - name: Install macOS build tools
         if: runner.os == 'macOS'
@@ -196,7 +196,11 @@ jobs:
           set -euo pipefail
           cp target/${{ matrix.target }}/release/herdr ${{ matrix.name }}
           chmod 0755 ${{ matrix.name }}
-          ./${{ matrix.name }} --version | tee VERSION.txt
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            qemu-aarch64-static ./${{ matrix.name }} --version | tee VERSION.txt
+          else
+            ./${{ matrix.name }} --version | tee VERSION.txt
+          fi
           file ${{ matrix.name }} | tee BUILD_INFO.txt
           if [ "${{ runner.os }}" = "Linux" ]; then
             ldd ${{ matrix.name }} > LDD_INFO.txt 2>&1 || true
