@@ -12,42 +12,44 @@ use crate::api::schema::{
     PluginPlatform, PluginSetEnabledParams, PluginSourceInfo, PluginSourceKind, PluginUnlinkParams,
     Request, ResponseResult, SplitDirection, SuccessResponse,
 };
+use crate::config::UiLanguage;
 use crate::popup_size::PopupSize;
 
 const PLUGIN_BUILD_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 
 pub(super) fn run_plugin_command(args: &[String]) -> std::io::Result<i32> {
+    let language = crate::config::Config::load().config.ui.language;
     let Some(subcommand) = args.first().map(|arg| arg.as_str()) else {
-        print_plugin_help();
+        print_plugin_help(language);
         return Ok(2);
     };
 
     match subcommand {
-        "install" => plugin_install(&args[1..]),
-        "uninstall" => plugin_uninstall(&args[1..]),
-        "link" => plugin_link(&args[1..]),
-        "list" => plugin_list(&args[1..]),
-        "config-dir" => plugin_config_dir_command(&args[1..]),
-        "unlink" => plugin_unlink(&args[1..]),
-        "enable" => plugin_set_enabled(&args[1..], true),
-        "disable" => plugin_set_enabled(&args[1..], false),
-        "action" => run_plugin_action_command(&args[1..]),
-        "log" | "logs" => plugin_log_list(&args[1..]),
-        "pane" => run_plugin_pane_command(&args[1..]),
+        "install" => plugin_install(&args[1..], language),
+        "uninstall" => plugin_uninstall(&args[1..], language),
+        "link" => plugin_link(&args[1..], language),
+        "list" => plugin_list(&args[1..], language),
+        "config-dir" => plugin_config_dir_command(&args[1..], language),
+        "unlink" => plugin_unlink(&args[1..], language),
+        "enable" => plugin_set_enabled(&args[1..], true, language),
+        "disable" => plugin_set_enabled(&args[1..], false, language),
+        "action" => run_plugin_action_command(&args[1..], language),
+        "log" | "logs" => plugin_log_list(&args[1..], language),
+        "pane" => run_plugin_pane_command(&args[1..], language),
         "help" | "--help" | "-h" => {
-            print_plugin_help();
+            print_plugin_help(language);
             Ok(0)
         }
         _ => {
-            print_plugin_help();
+            print_plugin_help(language);
             Ok(2)
         }
     }
 }
 
-fn plugin_link(args: &[String]) -> std::io::Result<i32> {
+fn plugin_link(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let Some(path) = args.first() else {
-        eprintln!("usage: herdr plugin link <path> [--disabled]");
+        print_usage(language, "herdr plugin link <path> [--disabled]");
         return Ok(2);
     };
     let path = normalize_plugin_path_arg(path)?;
@@ -64,7 +66,7 @@ fn plugin_link(args: &[String]) -> std::io::Result<i32> {
                 index += 1;
             }
             other => {
-                eprintln!("unknown option: {other}");
+                print_unknown_option(language, other);
                 return Ok(2);
             }
         }
@@ -85,13 +87,13 @@ fn plugin_link(args: &[String]) -> std::io::Result<i32> {
     super::print_response(&response)
 }
 
-fn plugin_config_dir_command(args: &[String]) -> std::io::Result<i32> {
+fn plugin_config_dir_command(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let Some(plugin_id) = args.first() else {
-        eprintln!("usage: herdr plugin config-dir <plugin_id>");
+        print_usage(language, "herdr plugin config-dir <plugin_id>");
         return Ok(2);
     };
     if args.len() != 1 {
-        eprintln!("usage: herdr plugin config-dir <plugin_id>");
+        print_usage(language, "herdr plugin config-dir <plugin_id>");
         return Ok(2);
     }
     let path = crate::plugin_paths::plugin_config_dir(plugin_id);
@@ -100,7 +102,7 @@ fn plugin_config_dir_command(args: &[String]) -> std::io::Result<i32> {
     Ok(0)
 }
 
-fn plugin_list(args: &[String]) -> std::io::Result<i32> {
+fn plugin_list(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let mut plugin_id = None;
     let mut json = false;
     let mut index = 0;
@@ -111,13 +113,13 @@ fn plugin_list(args: &[String]) -> std::io::Result<i32> {
                 index += 1;
             }
             "--plugin" => {
-                let Some(value) = required_value(args, &mut index, "--plugin") else {
+                let Some(value) = required_value(args, &mut index, language, "--plugin") else {
                     return Ok(2);
                 };
                 plugin_id = Some(value);
             }
             other => {
-                eprintln!("unknown option: {other}");
+                print_unknown_option(language, other);
                 return Ok(2);
             }
         }
@@ -134,16 +136,16 @@ fn plugin_list(args: &[String]) -> std::io::Result<i32> {
     if json {
         return super::print_response(&response);
     }
-    print_plugin_list_human(&response)
+    print_plugin_list_human(&response, language)
 }
 
-fn plugin_unlink(args: &[String]) -> std::io::Result<i32> {
+fn plugin_unlink(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let Some(plugin_id) = args.first() else {
-        eprintln!("usage: herdr plugin unlink <plugin_id>");
+        print_usage(language, "herdr plugin unlink <plugin_id>");
         return Ok(2);
     };
     if args.len() != 1 {
-        eprintln!("usage: herdr plugin unlink <plugin_id>");
+        print_usage(language, "herdr plugin unlink <plugin_id>");
         return Ok(2);
     }
     print_plugin_response(Method::PluginUnlink(PluginUnlinkParams {
@@ -151,15 +153,23 @@ fn plugin_unlink(args: &[String]) -> std::io::Result<i32> {
     }))
 }
 
-fn plugin_install(args: &[String]) -> std::io::Result<i32> {
+fn plugin_install(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
+    let text = crate::i18n::plugin_cli_text(language);
     let Some(source_arg) = args.first() else {
-        eprintln!("usage: herdr plugin install <owner>/<repo>[/subdir...] [--ref REF] [--yes]");
+        print_usage(
+            language,
+            "herdr plugin install <owner>/<repo>[/subdir...] [--ref REF] [--yes]",
+        );
         return Ok(2);
     };
     let source = match GithubPluginSource::parse(source_arg) {
         Ok(source) => source,
         Err(err) => {
-            eprintln!("{err}");
+            if let Some(usage) = err.strip_prefix("usage: ") {
+                print_usage(language, usage);
+            } else {
+                eprintln!("{err}");
+            }
             return Ok(2);
         }
     };
@@ -169,7 +179,7 @@ fn plugin_install(args: &[String]) -> std::io::Result<i32> {
     while index < args.len() {
         match args[index].as_str() {
             "--ref" => {
-                let Some(value) = required_value(args, &mut index, "--ref") else {
+                let Some(value) = required_value(args, &mut index, language, "--ref") else {
                     return Ok(2);
                 };
                 requested_ref = Some(value);
@@ -179,14 +189,14 @@ fn plugin_install(args: &[String]) -> std::io::Result<i32> {
                 index += 1;
             }
             other => {
-                eprintln!("unknown option: {other}");
+                print_unknown_option(language, other);
                 return Ok(2);
             }
         }
     }
 
     if !yes && !io::stdin().is_terminal() {
-        eprintln!("remote plugin install requires --yes when stdin is not interactive");
+        eprintln!("{}", text.noninteractive_install);
         return Ok(2);
     }
 
@@ -202,12 +212,12 @@ fn plugin_install(args: &[String]) -> std::io::Result<i32> {
 
         let mut source_info =
             source.to_source_info(requested_ref, resolved_commit, None, current_unix_ms());
-        print_install_preview(&preview_plugin, &source_info, existing.as_ref());
-        if !yes && !confirm("Install this plugin?")? {
-            eprintln!("plugin install cancelled");
+        print_install_preview(&preview_plugin, &source_info, existing.as_ref(), language);
+        if !yes && !confirm(text.install_prompt)? {
+            eprintln!("{}", text.install_cancelled);
             return Ok(0);
         }
-        if let Err(err) = run_plugin_build_commands(&preview_plugin, &manifest_root) {
+        if let Err(err) = run_plugin_build_commands(&preview_plugin, &manifest_root, language) {
             eprintln!("{err}");
             return Ok(1);
         }
@@ -249,9 +259,13 @@ fn plugin_install(args: &[String]) -> std::io::Result<i32> {
             }
             Err(InstallFailure::KeepCheckout(err)) => return Err(err),
         };
-        println!("Installed {} from {}.", plugin.plugin_id, source.display());
         println!(
-            "Config: {}",
+            "{}",
+            crate::i18n::plugin_installed_from(language, &plugin.plugin_id, &source.display())
+        );
+        println!(
+            "{}{}",
+            text.install_config,
             crate::plugin_paths::plugin_config_dir(&plugin.plugin_id).display()
         );
         Ok(0)
@@ -260,13 +274,19 @@ fn plugin_install(args: &[String]) -> std::io::Result<i32> {
     install_result
 }
 
-fn plugin_uninstall(args: &[String]) -> std::io::Result<i32> {
+fn plugin_uninstall(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let Some(target) = args.first() else {
-        eprintln!("usage: herdr plugin uninstall <plugin_id|owner/repo[/subdir...]>");
+        print_usage(
+            language,
+            "herdr plugin uninstall <plugin_id|owner/repo[/subdir...]>",
+        );
         return Ok(2);
     };
     if args.len() != 1 {
-        eprintln!("usage: herdr plugin uninstall <plugin_id|owner/repo[/subdir...]>");
+        print_usage(
+            language,
+            "herdr plugin uninstall <plugin_id|owner/repo[/subdir...]>",
+        );
         return Ok(2);
     }
 
@@ -274,7 +294,10 @@ fn plugin_uninstall(args: &[String]) -> std::io::Result<i32> {
         Ok(source) => {
             let existing = installed_plugin_by_github_source(&source)?;
             let Some(existing) = existing else {
-                eprintln!("plugin not installed: {}", source.display());
+                eprintln!(
+                    "{}",
+                    crate::i18n::plugin_not_installed(language, &source.display())
+                );
                 return Ok(1);
             };
             (existing.plugin_id.clone(), Some(existing))
@@ -300,7 +323,7 @@ fn plugin_uninstall(args: &[String]) -> std::io::Result<i32> {
                 return super::print_response(&response);
             }
             if response["result"]["removed"].as_bool() == Some(false) {
-                eprintln!("plugin not installed: {target}");
+                eprintln!("{}", crate::i18n::plugin_not_installed(language, target));
                 return Ok(1);
             }
         }
@@ -311,7 +334,7 @@ fn plugin_uninstall(args: &[String]) -> std::io::Result<i32> {
                 before != plugins.len()
             })?;
             if !removed {
-                eprintln!("plugin not installed: {target}");
+                eprintln!("{}", crate::i18n::plugin_not_installed(language, target));
                 return Ok(1);
             }
         }
@@ -321,23 +344,25 @@ fn plugin_uninstall(args: &[String]) -> std::io::Result<i32> {
     if let Some(plugin) = existing.as_ref() {
         remove_managed_plugin_files(plugin)?;
     }
-    println!("Uninstalled {plugin_id}.");
+    println!("{}", crate::i18n::plugin_uninstalled(language, &plugin_id));
     Ok(0)
 }
 
-fn plugin_set_enabled(args: &[String], enabled: bool) -> std::io::Result<i32> {
+fn plugin_set_enabled(
+    args: &[String],
+    enabled: bool,
+    language: UiLanguage,
+) -> std::io::Result<i32> {
+    let usage = format!(
+        "herdr plugin {} <plugin_id>",
+        if enabled { "enable" } else { "disable" }
+    );
     let Some(plugin_id) = args.first() else {
-        eprintln!(
-            "usage: herdr plugin {} <plugin_id>",
-            if enabled { "enable" } else { "disable" }
-        );
+        print_usage(language, &usage);
         return Ok(2);
     };
     if args.len() != 1 {
-        eprintln!(
-            "usage: herdr plugin {} <plugin_id>",
-            if enabled { "enable" } else { "disable" }
-        );
+        print_usage(language, &usage);
         return Ok(2);
     }
     let params = PluginSetEnabledParams {
@@ -350,7 +375,7 @@ fn plugin_set_enabled(args: &[String], enabled: bool) -> std::io::Result<i32> {
     }
 }
 
-fn plugin_log_list(args: &[String]) -> std::io::Result<i32> {
+fn plugin_log_list(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let mut plugin_id = None;
     let mut limit = None;
     let mut index = 0;
@@ -358,23 +383,26 @@ fn plugin_log_list(args: &[String]) -> std::io::Result<i32> {
         match args[index].as_str() {
             "list" if index == 0 => index += 1,
             "--plugin" => {
-                let Some(value) = required_value(args, &mut index, "--plugin") else {
+                let Some(value) = required_value(args, &mut index, language, "--plugin") else {
                     return Ok(2);
                 };
                 plugin_id = Some(value);
             }
             "--limit" => {
-                let Some(raw) = required_value(args, &mut index, "--limit") else {
+                let Some(raw) = required_value(args, &mut index, language, "--limit") else {
                     return Ok(2);
                 };
                 let Ok(parsed) = raw.parse::<usize>() else {
-                    eprintln!("invalid --limit value: {raw}");
+                    eprintln!(
+                        "{}{raw}",
+                        crate::i18n::plugin_cli_text(language).invalid_limit
+                    );
                     return Ok(2);
                 };
                 limit = Some(parsed);
             }
             other => {
-                eprintln!("unknown option: {other}");
+                print_unknown_option(language, other);
                 return Ok(2);
             }
         }
@@ -385,39 +413,39 @@ fn plugin_log_list(args: &[String]) -> std::io::Result<i32> {
     }))
 }
 
-fn run_plugin_action_command(args: &[String]) -> std::io::Result<i32> {
+fn run_plugin_action_command(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let Some(subcommand) = args.first().map(|arg| arg.as_str()) else {
-        print_plugin_action_help();
+        print_plugin_action_help(language);
         return Ok(2);
     };
 
     match subcommand {
-        "list" => plugin_action_list(&args[1..]),
-        "invoke" => plugin_action_invoke(&args[1..]),
+        "list" => plugin_action_list(&args[1..], language),
+        "invoke" => plugin_action_invoke(&args[1..], language),
         "help" | "--help" | "-h" => {
-            print_plugin_action_help();
+            print_plugin_action_help(language);
             Ok(0)
         }
         _ => {
-            print_plugin_action_help();
+            print_plugin_action_help(language);
             Ok(2)
         }
     }
 }
 
-fn plugin_action_list(args: &[String]) -> std::io::Result<i32> {
+fn plugin_action_list(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let mut plugin_id = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
             "--plugin" => {
-                let Some(value) = required_value(args, &mut index, "--plugin") else {
+                let Some(value) = required_value(args, &mut index, language, "--plugin") else {
                     return Ok(2);
                 };
                 plugin_id = Some(value);
             }
             other => {
-                eprintln!("unknown option: {other}");
+                print_unknown_option(language, other);
                 return Ok(2);
             }
         }
@@ -428,9 +456,12 @@ fn plugin_action_list(args: &[String]) -> std::io::Result<i32> {
     }))
 }
 
-fn plugin_action_invoke(args: &[String]) -> std::io::Result<i32> {
+fn plugin_action_invoke(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let Some(action_id) = args.first() else {
-        eprintln!("usage: herdr plugin action invoke <action_id> [--plugin ID]");
+        print_usage(
+            language,
+            "herdr plugin action invoke <action_id> [--plugin ID]",
+        );
         return Ok(2);
     };
     let mut plugin_id = None;
@@ -438,13 +469,13 @@ fn plugin_action_invoke(args: &[String]) -> std::io::Result<i32> {
     while index < args.len() {
         match args[index].as_str() {
             "--plugin" => {
-                let Some(value) = required_value(args, &mut index, "--plugin") else {
+                let Some(value) = required_value(args, &mut index, language, "--plugin") else {
                     return Ok(2);
                 };
                 plugin_id = Some(value);
             }
             other => {
-                eprintln!("unknown option: {other}");
+                print_unknown_option(language, other);
                 return Ok(2);
             }
         }
@@ -473,28 +504,28 @@ fn plugin_action_invoke(args: &[String]) -> std::io::Result<i32> {
     }))
 }
 
-fn run_plugin_pane_command(args: &[String]) -> std::io::Result<i32> {
+fn run_plugin_pane_command(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let Some(subcommand) = args.first().map(|arg| arg.as_str()) else {
-        print_plugin_pane_help();
+        print_plugin_pane_help(language);
         return Ok(2);
     };
 
     match subcommand {
-        "open" => plugin_pane_open(&args[1..]),
-        "focus" => plugin_pane_focus(&args[1..]),
-        "close" => plugin_pane_close(&args[1..]),
+        "open" => plugin_pane_open(&args[1..], language),
+        "focus" => plugin_pane_focus(&args[1..], language),
+        "close" => plugin_pane_close(&args[1..], language),
         "help" | "--help" | "-h" => {
-            print_plugin_pane_help();
+            print_plugin_pane_help(language);
             Ok(0)
         }
         _ => {
-            print_plugin_pane_help();
+            print_plugin_pane_help(language);
             Ok(2)
         }
     }
 }
 
-fn plugin_pane_open(args: &[String]) -> std::io::Result<i32> {
+fn plugin_pane_open(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let mut plugin_id = None;
     let mut entrypoint = None;
     let mut placement = None;
@@ -511,28 +542,28 @@ fn plugin_pane_open(args: &[String]) -> std::io::Result<i32> {
     while index < args.len() {
         match args[index].as_str() {
             "--plugin" => {
-                let Some(value) = required_value(args, &mut index, "--plugin") else {
+                let Some(value) = required_value(args, &mut index, language, "--plugin") else {
                     return Ok(2);
                 };
                 plugin_id = Some(value);
             }
             "--entrypoint" => {
-                let Some(value) = required_value(args, &mut index, "--entrypoint") else {
+                let Some(value) = required_value(args, &mut index, language, "--entrypoint") else {
                     return Ok(2);
                 };
                 entrypoint = Some(value);
             }
             "--placement" => {
-                let Some(value) = required_value(args, &mut index, "--placement") else {
+                let Some(value) = required_value(args, &mut index, language, "--placement") else {
                     return Ok(2);
                 };
-                let Some(parsed) = parse_pane_placement(&value) else {
+                let Some(parsed) = parse_pane_placement(&value, language) else {
                     return Ok(2);
                 };
                 placement = Some(parsed);
             }
             "--width" => {
-                let Some(value) = required_value(args, &mut index, "--width") else {
+                let Some(value) = required_value(args, &mut index, language, "--width") else {
                     return Ok(2);
                 };
                 let Some(parsed) = parse_popup_dimension(&value, "--width") else {
@@ -541,7 +572,7 @@ fn plugin_pane_open(args: &[String]) -> std::io::Result<i32> {
                 width = Some(parsed);
             }
             "--height" => {
-                let Some(value) = required_value(args, &mut index, "--height") else {
+                let Some(value) = required_value(args, &mut index, language, "--height") else {
                     return Ok(2);
                 };
                 let Some(parsed) = parse_popup_dimension(&value, "--height") else {
@@ -550,34 +581,35 @@ fn plugin_pane_open(args: &[String]) -> std::io::Result<i32> {
                 height = Some(parsed);
             }
             "--workspace" => {
-                let Some(value) = required_value(args, &mut index, "--workspace") else {
+                let Some(value) = required_value(args, &mut index, language, "--workspace") else {
                     return Ok(2);
                 };
                 workspace_id = Some(value);
             }
             "--target-pane" => {
-                let Some(value) = required_value(args, &mut index, "--target-pane") else {
+                let Some(value) = required_value(args, &mut index, language, "--target-pane")
+                else {
                     return Ok(2);
                 };
                 target_pane_id = Some(value);
             }
             "--direction" => {
-                let Some(value) = required_value(args, &mut index, "--direction") else {
+                let Some(value) = required_value(args, &mut index, language, "--direction") else {
                     return Ok(2);
                 };
-                let Some(parsed) = parse_split_direction(&value) else {
+                let Some(parsed) = parse_split_direction(&value, language) else {
                     return Ok(2);
                 };
                 direction = Some(parsed);
             }
             "--cwd" => {
-                let Some(value) = required_value(args, &mut index, "--cwd") else {
+                let Some(value) = required_value(args, &mut index, language, "--cwd") else {
                     return Ok(2);
                 };
                 cwd = Some(value);
             }
             "--env" => {
-                let Some(value) = required_value(args, &mut index, "--env") else {
+                let Some(value) = required_value(args, &mut index, language, "--env") else {
                     return Ok(2);
                 };
                 let (key, value) = match super::parse_env_assignment(&value) {
@@ -598,18 +630,19 @@ fn plugin_pane_open(args: &[String]) -> std::io::Result<i32> {
                 index += 1;
             }
             other => {
-                eprintln!("unknown option: {other}");
+                print_unknown_option(language, other);
                 return Ok(2);
             }
         }
     }
 
+    let text = crate::i18n::plugin_cli_text(language);
     let Some(plugin_id) = plugin_id else {
-        eprintln!("missing required --plugin");
+        eprintln!("{}--plugin", text.missing_required);
         return Ok(2);
     };
     let Some(entrypoint) = entrypoint else {
-        eprintln!("missing required --entrypoint");
+        eprintln!("{}--entrypoint", text.missing_required);
         return Ok(2);
     };
 
@@ -638,13 +671,13 @@ fn parse_popup_dimension(value: &str, flag: &str) -> Option<PopupSize> {
     }
 }
 
-fn plugin_pane_focus(args: &[String]) -> std::io::Result<i32> {
+fn plugin_pane_focus(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let Some(pane_id) = args.first() else {
-        eprintln!("usage: herdr plugin pane focus <pane_id>");
+        print_usage(language, "herdr plugin pane focus <pane_id>");
         return Ok(2);
     };
     if args.len() != 1 {
-        eprintln!("usage: herdr plugin pane focus <pane_id>");
+        print_usage(language, "herdr plugin pane focus <pane_id>");
         return Ok(2);
     }
     print_plugin_response(Method::PluginPaneFocus(PluginPaneFocusParams {
@@ -652,13 +685,13 @@ fn plugin_pane_focus(args: &[String]) -> std::io::Result<i32> {
     }))
 }
 
-fn plugin_pane_close(args: &[String]) -> std::io::Result<i32> {
+fn plugin_pane_close(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
     let Some(pane_id) = args.first() else {
-        eprintln!("usage: herdr plugin pane close <pane_id>");
+        print_usage(language, "herdr plugin pane close <pane_id>");
         return Ok(2);
     };
     if args.len() != 1 {
-        eprintln!("usage: herdr plugin pane close <pane_id>");
+        print_usage(language, "herdr plugin pane close <pane_id>");
         return Ok(2);
     }
     print_plugin_response(Method::PluginPaneClose(PluginPaneCloseParams {
@@ -666,16 +699,35 @@ fn plugin_pane_close(args: &[String]) -> std::io::Result<i32> {
     }))
 }
 
-fn required_value(args: &[String], index: &mut usize, flag: &str) -> Option<String> {
+fn print_usage(language: UiLanguage, usage: &str) {
+    eprintln!("{}{usage}", crate::i18n::plugin_cli_text(language).usage);
+}
+
+fn print_unknown_option(language: UiLanguage, option: &str) {
+    eprintln!(
+        "{}{option}",
+        crate::i18n::plugin_cli_text(language).unknown_option
+    );
+}
+
+fn required_value(
+    args: &[String],
+    index: &mut usize,
+    language: UiLanguage,
+    flag: &str,
+) -> Option<String> {
     let Some(value) = args.get(*index + 1) else {
-        eprintln!("missing value for {flag}");
+        eprintln!(
+            "{}{flag}",
+            crate::i18n::plugin_cli_text(language).missing_value
+        );
         return None;
     };
     *index += 2;
     Some(value.clone())
 }
 
-fn parse_pane_placement(value: &str) -> Option<PluginPanePlacement> {
+fn parse_pane_placement(value: &str, language: UiLanguage) -> Option<PluginPanePlacement> {
     match value {
         "overlay" => Some(PluginPanePlacement::Overlay),
         "popup" => Some(PluginPanePlacement::Popup),
@@ -683,18 +735,24 @@ fn parse_pane_placement(value: &str) -> Option<PluginPanePlacement> {
         "tab" => Some(PluginPanePlacement::Tab),
         "zoomed" | "fullscreen" => Some(PluginPanePlacement::Zoomed),
         _ => {
-            eprintln!("invalid pane placement: {value}");
+            eprintln!(
+                "{}{value}",
+                crate::i18n::plugin_cli_text(language).invalid_placement
+            );
             None
         }
     }
 }
 
-fn parse_split_direction(value: &str) -> Option<SplitDirection> {
+fn parse_split_direction(value: &str, language: UiLanguage) -> Option<SplitDirection> {
     match value {
         "right" => Some(SplitDirection::Right),
         "down" => Some(SplitDirection::Down),
         _ => {
-            eprintln!("invalid split direction: {value}");
+            eprintln!(
+                "{}{value}",
+                crate::i18n::plugin_cli_text(language).invalid_direction
+            );
             None
         }
     }
@@ -1128,7 +1186,10 @@ fn offline_plugin_list_response(params: &PluginListParams) -> std::io::Result<se
     .map_err(std::io::Error::other)
 }
 
-fn print_plugin_list_human(response: &serde_json::Value) -> std::io::Result<i32> {
+fn print_plugin_list_human(
+    response: &serde_json::Value,
+    language: UiLanguage,
+) -> std::io::Result<i32> {
     if response.get("error").is_some() {
         return super::print_response(response);
     }
@@ -1137,25 +1198,25 @@ fn print_plugin_list_human(response: &serde_json::Value) -> std::io::Result<i32>
     let ResponseResult::PluginList { plugins } = parsed.result else {
         return super::print_response(response);
     };
+    let text = crate::i18n::plugin_cli_text(language);
     if plugins.is_empty() {
-        println!("No plugins installed.");
+        println!("{}", text.no_plugins);
         return Ok(0);
     }
     println!(
-        "{} plugin{} installed:",
-        plugins.len(),
-        if plugins.len() == 1 { "" } else { "s" }
+        "{}",
+        crate::i18n::plugin_installed_count(language, plugins.len())
     );
     for plugin in plugins {
         let enabled = if plugin.enabled {
-            "enabled"
+            text.enabled
         } else {
-            "disabled"
+            text.disabled
         };
         let warning = if plugin.warnings.is_empty() {
             String::new()
         } else {
-            format!("; {} warning(s)", plugin.warnings.len())
+            crate::i18n::plugin_warning_count(language, plugin.warnings.len())
         };
         println!(
             "- {} ({}) {} [{}{}]",
@@ -1166,11 +1227,12 @@ fn print_plugin_list_human(response: &serde_json::Value) -> std::io::Result<i32>
             warning
         );
         println!(
-            "  config: {}",
+            "  {}{}",
+            text.config,
             crate::plugin_paths::plugin_config_dir(&plugin.plugin_id).display()
         );
         for warning in plugin.warnings {
-            println!("  warning: {warning}");
+            println!("  {}{warning}", text.warning);
         }
     }
     Ok(0)
@@ -1203,62 +1265,92 @@ fn print_install_preview(
     plugin: &InstalledPluginInfo,
     source: &PluginSourceInfo,
     existing: Option<&InstalledPluginInfo>,
+    language: UiLanguage,
 ) {
-    eprintln!("Plugin install preview:");
-    eprintln!("  id: {}", plugin.plugin_id);
-    eprintln!("  name: {}", plugin.name);
-    eprintln!("  version: {}", plugin.version);
+    let text = crate::i18n::plugin_cli_text(language);
+    eprintln!("{}", text.install_preview);
+    eprintln!("  {}{}", text.id, plugin.plugin_id);
+    eprintln!("  {}{}", text.name, plugin.name);
+    eprintln!("  {}{}", text.version, plugin.version);
     if let (Some(owner), Some(repo)) = (&source.owner, &source.repo) {
         let subdir = source
             .subdir
             .as_deref()
             .map(|subdir| format!("/{subdir}"))
             .unwrap_or_default();
-        eprintln!("  source: {owner}/{repo}{subdir}");
+        eprintln!("  {}{owner}/{repo}{subdir}", text.source);
     }
     if let Some(reference) = &source.requested_ref {
-        eprintln!("  ref: {reference}");
+        eprintln!("  {}{reference}", text.reference);
     }
     if let Some(commit) = &source.resolved_commit {
-        eprintln!("  commit: {commit}");
+        eprintln!("  {}{commit}", text.commit);
     }
-    eprintln!("  actions: {}", plugin.actions.len());
-    eprintln!("  startup commands: {}", plugin.startup.len());
-    eprintln!("  events: {}", plugin.events.len());
-    eprintln!("  panes: {}", plugin.panes.len());
-    eprintln!("  link handlers: {}", plugin.link_handlers.len());
-    eprintln!("  build commands: {}", plugin.build.len());
+    eprintln!("  {}{}", text.actions, plugin.actions.len());
+    eprintln!("  {}{}", text.startup_commands, plugin.startup.len());
+    eprintln!("  {}{}", text.events, plugin.events.len());
+    eprintln!("  {}{}", text.panes, plugin.panes.len());
+    eprintln!("  {}{}", text.link_handlers, plugin.link_handlers.len());
+    eprintln!("  {}{}", text.build_commands, plugin.build.len());
     for build in &plugin.build {
         let support = if build_platform_supported(&build.platforms, &plugin.platforms) {
             String::new()
         } else {
-            format!(
-                " (skipped on {})",
-                plugin_platform_name(current_plugin_platform())
+            crate::i18n::plugin_skipped_on(
+                language,
+                plugin_platform_name(current_plugin_platform()),
             )
         };
-        eprintln!("    build{}: {}", support, build.command.join(" "));
+        eprintln!(
+            "    {}{}{} {}",
+            text.build,
+            support,
+            text.output_separator,
+            build.command.join(" ")
+        );
     }
     for startup in &plugin.startup {
-        eprintln!("    startup: {}", startup.command.join(" "));
+        eprintln!(
+            "    {}{} {}",
+            text.startup,
+            text.output_separator,
+            startup.command.join(" ")
+        );
     }
     for action in &plugin.actions {
-        eprintln!("    action {}: {}", action.id, action.command.join(" "));
+        eprintln!(
+            "    {} {}{} {}",
+            text.action,
+            action.id,
+            text.output_separator,
+            action.command.join(" ")
+        );
     }
     for event in &plugin.events {
-        eprintln!("    event {}: {}", event.on, event.command.join(" "));
+        eprintln!(
+            "    {} {}{} {}",
+            text.event,
+            event.on,
+            text.output_separator,
+            event.command.join(" ")
+        );
     }
     for pane in &plugin.panes {
-        eprintln!("    pane {}: {}", pane.id, pane.command.join(" "));
+        eprintln!(
+            "    {} {}{} {}",
+            text.pane,
+            pane.id,
+            text.output_separator,
+            pane.command.join(" ")
+        );
     }
     for warning in &plugin.warnings {
-        eprintln!("  warning: {warning}");
+        eprintln!("  {}{warning}", text.warning);
     }
     if let Some(existing) = existing {
         eprintln!(
-            "  replaces: {} from {}",
-            existing.plugin_id,
-            source_display(existing)
+            "{}",
+            crate::i18n::plugin_replaces(language, &existing.plugin_id, &source_display(existing))
         );
     }
 }
@@ -1266,6 +1358,7 @@ fn print_install_preview(
 fn run_plugin_build_commands(
     plugin: &InstalledPluginInfo,
     manifest_root: &Path,
+    language: UiLanguage,
 ) -> Result<(), Box<PluginBuildFailure>> {
     let total = plugin.build.len();
     for (index, build) in plugin.build.iter().enumerate() {
@@ -1278,6 +1371,7 @@ fn run_plugin_build_commands(
             total,
             manifest_root,
             &build.command,
+            language,
         )?;
     }
     Ok(())
@@ -1301,8 +1395,9 @@ fn run_plugin_build_command(
     build_total: usize,
     cwd: &Path,
     command: &[String],
+    language: UiLanguage,
 ) -> Result<(), Box<PluginBuildFailure>> {
-    let context = plugin_build_context(plugin_id, build_index, build_total, cwd, command);
+    let context = plugin_build_context(plugin_id, build_index, build_total, cwd, command, language);
     let Some(program) = command.first() else {
         return Err(Box::new(PluginBuildFailure {
             context,
@@ -1370,6 +1465,7 @@ fn plugin_build_context(
     build_total: usize,
     cwd: &Path,
     command: &[String],
+    language: UiLanguage,
 ) -> PluginBuildContext {
     PluginBuildContext {
         plugin_id: plugin_id.to_string(),
@@ -1377,6 +1473,7 @@ fn plugin_build_context(
         build_total,
         cwd: cwd.display().to_string(),
         command: command.to_vec(),
+        language,
     }
 }
 
@@ -1393,6 +1490,7 @@ struct PluginBuildContext {
     build_total: usize,
     cwd: String,
     command: Vec<String>,
+    language: UiLanguage,
 }
 
 #[derive(Debug)]
@@ -1418,45 +1516,48 @@ enum PluginBuildFailureKind {
 
 impl fmt::Display for PluginBuildFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "error: plugin build failed")?;
+        let text = crate::i18n::plugin_cli_text(self.context.language);
+        writeln!(f, "{}", text.build_failed)?;
         write_build_context(f, &self.context)?;
         match &self.kind {
             PluginBuildFailureKind::Start { error } => {
-                writeln!(f, "  error: failed to start: {error}")?;
+                writeln!(f, "{}{error}", text.failed_to_start)?;
             }
             PluginBuildFailureKind::Wait { error } => {
-                writeln!(f, "  error: failed to wait for command: {error}")?;
+                writeln!(f, "{}{error}", text.failed_to_wait)?;
             }
             PluginBuildFailureKind::Exit {
                 status,
                 stdout,
                 stderr,
             } => {
-                writeln!(f, "  status: {status}")?;
-                write_output_section(f, "stderr", stderr)?;
-                write_output_section(f, "stdout", stdout)?;
+                writeln!(f, "{}{status}", text.build_status)?;
+                write_output_section(f, text.stderr, stderr, text)?;
+                write_output_section(f, text.stdout, stdout, text)?;
             }
         }
         writeln!(f)?;
-        write!(f, "Plugin was not installed.")
+        write!(f, "{}", text.plugin_not_installed)
     }
 }
 
 fn write_build_context(f: &mut fmt::Formatter<'_>, context: &PluginBuildContext) -> fmt::Result {
-    writeln!(f, "  plugin: {}", context.plugin_id)?;
+    let text = crate::i18n::plugin_cli_text(context.language);
+    writeln!(f, "{}{}", text.build_plugin, context.plugin_id)?;
     writeln!(
         f,
-        "  build: {}/{}",
-        context.build_index, context.build_total
+        "{}{}/{}",
+        text.build_step, context.build_index, context.build_total
     )?;
-    writeln!(f, "  cwd: {}", context.cwd)?;
-    writeln!(f, "  command: {}", context.command.join(" "))
+    writeln!(f, "{}{}", text.build_cwd, context.cwd)?;
+    writeln!(f, "{}{}", text.build_command, context.command.join(" "))
 }
 
 fn write_output_section(
     f: &mut fmt::Formatter<'_>,
     label: &str,
     output: &CappedOutput,
+    framing: &crate::i18n::PluginCliText,
 ) -> fmt::Result {
     let text = output.text.trim_end();
     if text.is_empty() {
@@ -1466,10 +1567,11 @@ fn write_output_section(
     if output.truncated {
         writeln!(
             f,
-            "{label}: showing last {PLUGIN_BUILD_OUTPUT_MAX_BYTES} bytes; earlier output omitted"
+            "{label}{}{}{PLUGIN_BUILD_OUTPUT_MAX_BYTES}{}",
+            framing.output_separator, framing.showing_last, framing.earlier_output_omitted
         )?;
     } else {
-        writeln!(f, "{label}:")?;
+        writeln!(f, "{label}{}", framing.output_separator)?;
     }
     writeln!(f, "{text}")
 }
@@ -1635,8 +1737,11 @@ fn print_plugin_response(method: Method) -> std::io::Result<i32> {
     })?)
 }
 
-fn print_plugin_help() {
-    eprintln!("herdr plugin commands:");
+fn print_plugin_help(language: UiLanguage) {
+    eprintln!(
+        "{}",
+        crate::i18n::plugin_cli_text(language).commands_heading
+    );
     eprintln!("  herdr plugin install <owner>/<repo>[/subdir...] [--ref REF] [--yes]");
     eprintln!("  herdr plugin uninstall <plugin_id|owner/repo[/subdir...]>");
     eprintln!("  herdr plugin link <path> [--disabled]");
@@ -1650,14 +1755,20 @@ fn print_plugin_help() {
     eprintln!("  herdr plugin pane <open|focus|close>");
 }
 
-fn print_plugin_action_help() {
-    eprintln!("herdr plugin action commands:");
+fn print_plugin_action_help(language: UiLanguage) {
+    eprintln!(
+        "{}",
+        crate::i18n::plugin_cli_text(language).action_commands_heading
+    );
     eprintln!("  herdr plugin action list [--plugin ID]");
     eprintln!("  herdr plugin action invoke <action_id> [--plugin ID]");
 }
 
-fn print_plugin_pane_help() {
-    eprintln!("herdr plugin pane commands:");
+fn print_plugin_pane_help(language: UiLanguage) {
+    eprintln!(
+        "{}",
+        crate::i18n::plugin_cli_text(language).pane_commands_heading
+    );
     eprintln!("  herdr plugin pane open --plugin ID --entrypoint ID [--placement overlay|popup|split|tab|zoomed] [--width SIZE] [--height SIZE] [--workspace ID] [--target-pane PANE] [--direction right|down] [--cwd PATH] [--env KEY=VALUE] [--focus|--no-focus]");
     eprintln!("  herdr plugin pane focus <pane_id>");
     eprintln!("  herdr plugin pane close <pane_id>");
@@ -1813,7 +1924,7 @@ mod tests {
         std::fs::write(legacy_dir.join(".env"), "TOKEN=legacy\n").unwrap();
 
         assert_eq!(
-            plugin_config_dir_command(std::slice::from_ref(&plugin_id)).unwrap(),
+            plugin_config_dir_command(std::slice::from_ref(&plugin_id), UiLanguage::En).unwrap(),
             0
         );
 

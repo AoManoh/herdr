@@ -28,7 +28,7 @@ pub(super) fn run_completion_command(args: &[String]) -> std::io::Result<i32> {
         return Ok(2);
     };
 
-    let mut command = super::spec::command();
+    let mut command = super::spec::localized_command();
     if matches!(shell, Shell::Zsh) {
         let mut output = Vec::new();
         generate(shell, &mut command, "herdr", &mut output);

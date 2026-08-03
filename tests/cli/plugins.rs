@@ -1,5 +1,69 @@
 use super::harness::*;
 
+fn write_ui_language(config_home: &Path, language: &str) {
+    let config_dir = config_home.join(app_dir_name());
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        format!("[ui]\nlanguage = \"{language}\"\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn plugin_help_and_errors_follow_zh_cn_config() {
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    write_ui_language(&config_home, "zh-cn");
+    fs::create_dir_all(&runtime_dir).unwrap();
+
+    let manual_help = run_named_cli(&config_home, &runtime_dir, &["plugin", "help"]);
+    assert!(manual_help.status.success());
+    let stderr = String::from_utf8_lossy(&manual_help.stderr);
+    assert!(stderr.contains("herdr 插件命令："), "{stderr}");
+    assert!(
+        stderr.contains("herdr plugin install <owner>/<repo>[/subdir...]"),
+        "{stderr}"
+    );
+
+    let action_help = run_named_cli(&config_home, &runtime_dir, &["plugin", "action", "help"]);
+    assert!(action_help.status.success());
+    let stderr = String::from_utf8_lossy(&action_help.stderr);
+    assert!(stderr.contains("herdr 插件操作命令："), "{stderr}");
+
+    let pane_help = run_named_cli(&config_home, &runtime_dir, &["plugin", "pane", "help"]);
+    assert!(pane_help.status.success());
+    let stderr = String::from_utf8_lossy(&pane_help.stderr);
+    assert!(stderr.contains("herdr 插件窗格命令："), "{stderr}");
+
+    let spec_help = run_named_cli(&config_home, &runtime_dir, &["plugin", "--help"]);
+    assert!(spec_help.status.success());
+    let stdout = String::from_utf8_lossy(&spec_help.stdout);
+    assert!(stdout.contains("安装并运行工作流插件"), "{stdout}");
+    assert!(stdout.contains("从 GitHub 安装插件"), "{stdout}");
+
+    let usage = run_named_cli(&config_home, &runtime_dir, &["plugin", "install"]);
+    assert_eq!(usage.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&usage.stderr);
+    assert!(
+        stderr
+            .contains("用法：herdr plugin install <owner>/<repo>[/subdir...] [--ref REF] [--yes]"),
+        "{stderr}"
+    );
+
+    let unknown = run_named_cli(
+        &config_home,
+        &runtime_dir,
+        &["plugin", "list", "--not-an-option"],
+    );
+    assert_eq!(unknown.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(stderr.contains("未知选项：--not-an-option"), "{stderr}");
+
+    cleanup_test_base(&base);
+}
+
 #[test]
 fn named_sessions_share_live_plugin_registry() {
     let base = unique_test_dir();
@@ -421,7 +485,7 @@ command = ["sh", "-c", "echo bootstrap"]
     );
     run_git(&source_repo, &["commit", "--quiet", "-m", "add plugin"]);
 
-    fs::create_dir_all(&config_home).unwrap();
+    write_ui_language(&config_home, "zh-cn");
     fs::create_dir_all(&runtime_dir).unwrap();
     let git_config = base.join("gitconfig");
     fs::write(
@@ -455,12 +519,50 @@ command = ["sh", "-c", "echo bootstrap"]
         String::from_utf8_lossy(&install.stdout),
         String::from_utf8_lossy(&install.stderr)
     );
+    let stdout = String::from_utf8_lossy(&install.stdout);
+    let stderr = String::from_utf8_lossy(&install.stderr);
+    assert!(
+        stdout.contains(
+            "已从 ogulcancelik/herdr-plugin-examples/worktree-bootstrap 安装 example.worktree-bootstrap。"
+        ),
+        "{stdout}"
+    );
+    assert!(stdout.contains("配置："), "{stdout}");
+    assert!(stderr.contains("插件安装预览："), "{stderr}");
+    assert!(stderr.contains("  名称：Worktree Bootstrap"), "{stderr}");
+    assert!(stderr.contains("  构建命令：1"), "{stderr}");
 
-    let listed = run_named_cli_json(
+    let listed_human = run_named_cli(
+        &config_home,
+        &runtime_dir,
+        &["--session", "other", "plugin", "list"],
+    );
+    assert!(listed_human.status.success());
+    let stdout = String::from_utf8_lossy(&listed_human.stdout);
+    assert!(stdout.contains("已安装 1 个插件："), "{stdout}");
+    assert!(
+        stdout.contains("example.worktree-bootstrap (Worktree Bootstrap) 已启用"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("  配置："), "{stdout}");
+
+    let zh_json = run_named_cli(
         &config_home,
         &runtime_dir,
         &["--session", "other", "plugin", "list", "--json"],
     );
+    assert!(zh_json.status.success());
+    assert!(zh_json.stderr.is_empty());
+    assert!(!String::from_utf8_lossy(&zh_json.stdout).contains("插件"));
+    write_ui_language(&config_home, "en");
+    let en_json = run_named_cli(
+        &config_home,
+        &runtime_dir,
+        &["--session", "other", "plugin", "list", "--json"],
+    );
+    assert_eq!(zh_json.stdout, en_json.stdout);
+    assert_eq!(zh_json.stderr, en_json.stderr);
+    let listed: serde_json::Value = serde_json::from_slice(&zh_json.stdout).unwrap();
     let plugin = &listed["result"]["plugins"][0];
     assert_eq!(plugin["plugin_id"], "example.worktree-bootstrap");
     assert_eq!(plugin["source"]["kind"], "github");
@@ -486,6 +588,7 @@ command = ["sh", "-c", "echo bootstrap"]
         "build command should not inherit HERDR_SESSION"
     );
 
+    write_ui_language(&config_home, "zh-cn");
     let uninstall = run_named_cli(
         &config_home,
         &runtime_dir,
@@ -503,9 +606,24 @@ command = ["sh", "-c", "echo bootstrap"]
         String::from_utf8_lossy(&uninstall.stdout),
         String::from_utf8_lossy(&uninstall.stderr)
     );
+    assert_eq!(
+        String::from_utf8_lossy(&uninstall.stdout),
+        "已卸载 example.worktree-bootstrap。\n"
+    );
     assert!(
         !managed_path.exists(),
         "managed checkout should be deleted on uninstall"
+    );
+
+    let listed_human = run_named_cli(
+        &config_home,
+        &runtime_dir,
+        &["--session", "other", "plugin", "list"],
+    );
+    assert!(listed_human.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&listed_human.stdout),
+        "未安装任何插件。\n"
     );
 
     let listed = run_named_cli_json(
@@ -552,7 +670,7 @@ command = ["sh", "-c", "echo should-not-install"]
         &["commit", "--quiet", "-m", "add failing plugin"],
     );
 
-    fs::create_dir_all(&config_home).unwrap();
+    write_ui_language(&config_home, "zh-cn");
     fs::create_dir_all(&runtime_dir).unwrap();
     let git_config = base.join("gitconfig");
     fs::write(
@@ -583,18 +701,18 @@ command = ["sh", "-c", "echo should-not-install"]
     );
     assert_eq!(install.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&install.stderr);
-    assert!(stderr.contains("error: plugin build failed"), "{stderr}");
-    assert!(stderr.contains("  plugin: example.build-fail"), "{stderr}");
-    assert!(stderr.contains("  build: 1/1"), "{stderr}");
-    assert!(stderr.contains("  cwd: "), "{stderr}");
+    assert!(stderr.contains("错误：插件构建失败"), "{stderr}");
+    assert!(stderr.contains("  插件：example.build-fail"), "{stderr}");
+    assert!(stderr.contains("  构建：1/1"), "{stderr}");
+    assert!(stderr.contains("  工作目录："), "{stderr}");
     assert!(
-        stderr.contains("  command: sh -c echo before-fail && echo failed-build >&2 && exit 7"),
+        stderr.contains("  命令：sh -c echo before-fail && echo failed-build >&2 && exit 7"),
         "{stderr}"
     );
-    assert!(stderr.contains("  status: exit status: 7"), "{stderr}");
-    assert!(stderr.contains("stdout:\nbefore-fail"), "{stderr}");
-    assert!(stderr.contains("stderr:\nfailed-build"), "{stderr}");
-    assert!(stderr.contains("Plugin was not installed."), "{stderr}");
+    assert!(stderr.contains("  状态：exit status: 7"), "{stderr}");
+    assert!(stderr.contains("标准输出：\nbefore-fail"), "{stderr}");
+    assert!(stderr.contains("标准错误：\nfailed-build"), "{stderr}");
+    assert!(stderr.contains("插件未安装。"), "{stderr}");
     assert!(!stderr.contains("Error: Custom"), "{stderr}");
 
     let listed = run_named_cli_json(

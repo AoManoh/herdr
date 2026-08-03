@@ -1009,6 +1009,281 @@ pub(crate) fn menu_text(language: UiLanguage) -> &'static MenuText {
     }
 }
 
+pub(crate) struct PluginCliText {
+    pub plugin_about: &'static str,
+    pub install_about: &'static str,
+    pub uninstall_about: &'static str,
+    pub link_about: &'static str,
+    pub unlink_about: &'static str,
+    pub enable_about: &'static str,
+    pub disable_about: &'static str,
+    pub list_about: &'static str,
+    pub config_dir_about: &'static str,
+    pub action_about: &'static str,
+    pub action_list_about: &'static str,
+    pub action_invoke_about: &'static str,
+    pub log_about: &'static str,
+    pub log_list_about: &'static str,
+    pub pane_about: &'static str,
+    pub pane_open_about: &'static str,
+    pub pane_focus_about: &'static str,
+    pub pane_close_about: &'static str,
+    pub commands_heading: &'static str,
+    pub action_commands_heading: &'static str,
+    pub pane_commands_heading: &'static str,
+    pub usage: &'static str,
+    pub unknown_option: &'static str,
+    pub missing_value: &'static str,
+    pub invalid_limit: &'static str,
+    pub noninteractive_install: &'static str,
+    pub install_cancelled: &'static str,
+    pub install_prompt: &'static str,
+    pub missing_required: &'static str,
+    pub invalid_placement: &'static str,
+    pub invalid_direction: &'static str,
+    pub no_plugins: &'static str,
+    pub enabled: &'static str,
+    pub disabled: &'static str,
+    pub config: &'static str,
+    pub install_config: &'static str,
+    pub warning: &'static str,
+    pub install_preview: &'static str,
+    pub id: &'static str,
+    pub name: &'static str,
+    pub version: &'static str,
+    pub source: &'static str,
+    pub reference: &'static str,
+    pub commit: &'static str,
+    pub actions: &'static str,
+    pub startup_commands: &'static str,
+    pub events: &'static str,
+    pub panes: &'static str,
+    pub link_handlers: &'static str,
+    pub build_commands: &'static str,
+    pub build: &'static str,
+    pub startup: &'static str,
+    pub action: &'static str,
+    pub event: &'static str,
+    pub pane: &'static str,
+    pub build_failed: &'static str,
+    pub build_plugin: &'static str,
+    pub build_step: &'static str,
+    pub build_cwd: &'static str,
+    pub build_command: &'static str,
+    pub failed_to_start: &'static str,
+    pub failed_to_wait: &'static str,
+    pub build_status: &'static str,
+    pub stderr: &'static str,
+    pub stdout: &'static str,
+    pub output_separator: &'static str,
+    pub showing_last: &'static str,
+    pub earlier_output_omitted: &'static str,
+    pub plugin_not_installed: &'static str,
+}
+
+const PLUGIN_CLI_EN: PluginCliText = PluginCliText {
+    plugin_about: "Install and run workflow plugins",
+    install_about: "Install a plugin from GitHub",
+    uninstall_about: "Uninstall a plugin",
+    link_about: "Link a local plugin",
+    unlink_about: "Unlink a local plugin",
+    enable_about: "Enable a plugin",
+    disable_about: "Disable a plugin",
+    list_about: "List installed plugins",
+    config_dir_about: "Print a plugin config directory",
+    action_about: "List or invoke plugin actions",
+    action_list_about: "List plugin actions",
+    action_invoke_about: "Invoke a plugin action",
+    log_about: "Inspect plugin command logs",
+    log_list_about: "List plugin command logs",
+    pane_about: "Manage plugin-owned panes",
+    pane_open_about: "Open a plugin pane",
+    pane_focus_about: "Focus a plugin pane",
+    pane_close_about: "Close a plugin pane",
+    commands_heading: "herdr plugin commands:",
+    action_commands_heading: "herdr plugin action commands:",
+    pane_commands_heading: "herdr plugin pane commands:",
+    usage: "usage: ",
+    unknown_option: "unknown option: ",
+    missing_value: "missing value for ",
+    invalid_limit: "invalid --limit value: ",
+    noninteractive_install: "remote plugin install requires --yes when stdin is not interactive",
+    install_cancelled: "plugin install cancelled",
+    install_prompt: "Install this plugin?",
+    missing_required: "missing required ",
+    invalid_placement: "invalid pane placement: ",
+    invalid_direction: "invalid split direction: ",
+    no_plugins: "No plugins installed.",
+    enabled: "enabled",
+    disabled: "disabled",
+    config: "config: ",
+    install_config: "Config: ",
+    warning: "warning: ",
+    install_preview: "Plugin install preview:",
+    id: "id: ",
+    name: "name: ",
+    version: "version: ",
+    source: "source: ",
+    reference: "ref: ",
+    commit: "commit: ",
+    actions: "actions: ",
+    startup_commands: "startup commands: ",
+    events: "events: ",
+    panes: "panes: ",
+    link_handlers: "link handlers: ",
+    build_commands: "build commands: ",
+    build: "build",
+    startup: "startup",
+    action: "action",
+    event: "event",
+    pane: "pane",
+    build_failed: "error: plugin build failed",
+    build_plugin: "  plugin: ",
+    build_step: "  build: ",
+    build_cwd: "  cwd: ",
+    build_command: "  command: ",
+    failed_to_start: "  error: failed to start: ",
+    failed_to_wait: "  error: failed to wait for command: ",
+    build_status: "  status: ",
+    stderr: "stderr",
+    stdout: "stdout",
+    output_separator: ":",
+    showing_last: " showing last ",
+    earlier_output_omitted: " bytes; earlier output omitted",
+    plugin_not_installed: "Plugin was not installed.",
+};
+
+const PLUGIN_CLI_ZH_CN: PluginCliText = PluginCliText {
+    plugin_about: "安装并运行工作流插件",
+    install_about: "从 GitHub 安装插件",
+    uninstall_about: "卸载插件",
+    link_about: "链接本地插件",
+    unlink_about: "取消链接本地插件",
+    enable_about: "启用插件",
+    disable_about: "禁用插件",
+    list_about: "列出已安装插件",
+    config_dir_about: "输出插件配置目录",
+    action_about: "列出或调用插件操作",
+    action_list_about: "列出插件操作",
+    action_invoke_about: "调用插件操作",
+    log_about: "查看插件命令日志",
+    log_list_about: "列出插件命令日志",
+    pane_about: "管理插件所属窗格",
+    pane_open_about: "打开插件窗格",
+    pane_focus_about: "聚焦插件窗格",
+    pane_close_about: "关闭插件窗格",
+    commands_heading: "herdr 插件命令：",
+    action_commands_heading: "herdr 插件操作命令：",
+    pane_commands_heading: "herdr 插件窗格命令：",
+    usage: "用法：",
+    unknown_option: "未知选项：",
+    missing_value: "缺少以下选项的值：",
+    invalid_limit: "无效的 --limit 值：",
+    noninteractive_install: "标准输入不是交互式终端时，远程插件安装需要 --yes",
+    install_cancelled: "已取消插件安装",
+    install_prompt: "安装此插件？",
+    missing_required: "缺少必需选项：",
+    invalid_placement: "无效的窗格位置：",
+    invalid_direction: "无效的拆分方向：",
+    no_plugins: "未安装任何插件。",
+    enabled: "已启用",
+    disabled: "已禁用",
+    config: "配置：",
+    install_config: "配置：",
+    warning: "警告：",
+    install_preview: "插件安装预览：",
+    id: "ID：",
+    name: "名称：",
+    version: "版本：",
+    source: "来源：",
+    reference: "引用：",
+    commit: "提交：",
+    actions: "操作数：",
+    startup_commands: "启动命令：",
+    events: "事件数：",
+    panes: "窗格数：",
+    link_handlers: "链接处理器：",
+    build_commands: "构建命令：",
+    build: "构建",
+    startup: "启动",
+    action: "操作",
+    event: "事件",
+    pane: "窗格",
+    build_failed: "错误：插件构建失败",
+    build_plugin: "  插件：",
+    build_step: "  构建：",
+    build_cwd: "  工作目录：",
+    build_command: "  命令：",
+    failed_to_start: "  错误：启动失败：",
+    failed_to_wait: "  错误：等待命令失败：",
+    build_status: "  状态：",
+    stderr: "标准错误",
+    stdout: "标准输出",
+    output_separator: "：",
+    showing_last: "仅显示最后 ",
+    earlier_output_omitted: " 字节；更早的输出已省略",
+    plugin_not_installed: "插件未安装。",
+};
+
+pub(crate) fn plugin_cli_text(language: UiLanguage) -> &'static PluginCliText {
+    match language {
+        UiLanguage::En => &PLUGIN_CLI_EN,
+        UiLanguage::ZhCn => &PLUGIN_CLI_ZH_CN,
+    }
+}
+
+pub(crate) fn plugin_installed_count(language: UiLanguage, count: usize) -> String {
+    match language {
+        UiLanguage::En => format!(
+            "{count} plugin{} installed:",
+            if count == 1 { "" } else { "s" }
+        ),
+        UiLanguage::ZhCn => format!("已安装 {count} 个插件："),
+    }
+}
+
+pub(crate) fn plugin_warning_count(language: UiLanguage, count: usize) -> String {
+    match language {
+        UiLanguage::En => format!("; {count} warning(s)"),
+        UiLanguage::ZhCn => format!("；{count} 个警告"),
+    }
+}
+
+pub(crate) fn plugin_installed_from(language: UiLanguage, plugin_id: &str, source: &str) -> String {
+    match language {
+        UiLanguage::En => format!("Installed {plugin_id} from {source}."),
+        UiLanguage::ZhCn => format!("已从 {source} 安装 {plugin_id}。"),
+    }
+}
+
+pub(crate) fn plugin_not_installed(language: UiLanguage, target: &str) -> String {
+    match language {
+        UiLanguage::En => format!("plugin not installed: {target}"),
+        UiLanguage::ZhCn => format!("未安装插件：{target}"),
+    }
+}
+
+pub(crate) fn plugin_uninstalled(language: UiLanguage, plugin_id: &str) -> String {
+    match language {
+        UiLanguage::En => format!("Uninstalled {plugin_id}."),
+        UiLanguage::ZhCn => format!("已卸载 {plugin_id}。"),
+    }
+}
+
+pub(crate) fn plugin_skipped_on(language: UiLanguage, platform: &str) -> String {
+    match language {
+        UiLanguage::En => format!(" (skipped on {platform})"),
+        UiLanguage::ZhCn => format!("（在 {platform} 上跳过）"),
+    }
+}
+
+pub(crate) fn plugin_replaces(language: UiLanguage, plugin_id: &str, source: &str) -> String {
+    match language {
+        UiLanguage::En => format!("  replaces: {plugin_id} from {source}"),
+        UiLanguage::ZhCn => format!("  替换：{plugin_id}（来源：{source}）"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1032,5 +1307,29 @@ mod tests {
         );
         assert_eq!(settings_text(UiLanguage::ZhCn).title, " 设置");
         assert_eq!(pane_count(UiLanguage::ZhCn, 3), "3 个窗格");
+        assert_eq!(
+            plugin_cli_text(UiLanguage::En).install_preview,
+            "Plugin install preview:"
+        );
+        assert_eq!(
+            plugin_cli_text(UiLanguage::ZhCn).install_preview,
+            "插件安装预览："
+        );
+        assert_eq!(
+            plugin_installed_from(UiLanguage::ZhCn, "example.plugin", "owner/repo"),
+            "已从 owner/repo 安装 example.plugin。"
+        );
+        assert_eq!(
+            plugin_cli_text(UiLanguage::ZhCn).install_prompt,
+            "安装此插件？"
+        );
+        assert_eq!(
+            plugin_cli_text(UiLanguage::ZhCn).install_cancelled,
+            "已取消插件安装"
+        );
+        assert_eq!(
+            plugin_not_installed(UiLanguage::ZhCn, "example.plugin"),
+            "未安装插件：example.plugin"
+        );
     }
 }

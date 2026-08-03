@@ -2,7 +2,16 @@ use std::io::Write;
 
 use clap::{Arg, ArgAction, ArgGroup, Command, ValueHint};
 
+#[cfg(test)]
 pub(super) fn command() -> Command {
+    command_with_language(crate::config::UiLanguage::En)
+}
+
+pub(super) fn localized_command() -> Command {
+    command_with_language(crate::config::Config::load().config.ui.language)
+}
+
+fn command_with_language(language: crate::config::UiLanguage) -> Command {
     let command = Command::new("herdr")
         .about("terminal workspace manager for AI coding agents")
         .disable_help_flag(true)
@@ -42,7 +51,7 @@ pub(super) fn command() -> Command {
         .subcommand(terminal_command())
         .subcommand(session_command())
         .subcommand(integration_command())
-        .subcommand(plugin_command());
+        .subcommand(plugin_command(language));
     configure_help(command, true)
 }
 
@@ -76,7 +85,7 @@ fn write_requested_help(args: &[String], output: &mut impl Write) -> std::io::Re
         return Ok(false);
     }
 
-    let mut root = command();
+    let mut root = localized_command();
     root.build();
     let mut selected = &mut root;
     let mut path = vec!["herdr".to_string()];
@@ -758,12 +767,13 @@ fn integration_command() -> Command {
         )
 }
 
-fn plugin_command() -> Command {
+fn plugin_command(language: crate::config::UiLanguage) -> Command {
+    let text = crate::i18n::plugin_cli_text(language);
     Command::new("plugin")
-        .about("Install and run workflow plugins")
+        .about(text.plugin_about)
         .subcommand(
             Command::new("install")
-                .about("Install a plugin from GitHub")
+                .about(text.install_about)
                 .arg(required("source", "OWNER/REPO[/SUBDIR]"))
                 .arg(option("ref", "REF"))
                 .arg(
@@ -775,74 +785,74 @@ fn plugin_command() -> Command {
         )
         .subcommand(
             Command::new("uninstall")
-                .about("Uninstall a plugin")
+                .about(text.uninstall_about)
                 .arg(required("plugin", "PLUGIN")),
         )
         .subcommand(
             Command::new("link")
-                .about("Link a local plugin")
+                .about(text.link_about)
                 .arg(path_arg("path", "PATH"))
                 .arg(flag("disabled"))
                 .arg(flag("enabled")),
         )
         .subcommand(
             Command::new("unlink")
-                .about("Unlink a local plugin")
+                .about(text.unlink_about)
                 .arg(required("plugin_id", "PLUGIN_ID")),
         )
         .subcommand(
             Command::new("enable")
-                .about("Enable a plugin")
+                .about(text.enable_about)
                 .arg(required("plugin_id", "PLUGIN_ID")),
         )
         .subcommand(
             Command::new("disable")
-                .about("Disable a plugin")
+                .about(text.disable_about)
                 .arg(required("plugin_id", "PLUGIN_ID")),
         )
         .subcommand(
             Command::new("list")
-                .about("List installed plugins")
+                .about(text.list_about)
                 .arg(option("plugin", "ID"))
                 .arg(json_flag()),
         )
         .subcommand(
             Command::new("config-dir")
-                .about("Print a plugin config directory")
+                .about(text.config_dir_about)
                 .arg(required("plugin_id", "PLUGIN_ID")),
         )
         .subcommand(
             Command::new("action")
-                .about("List or invoke plugin actions")
+                .about(text.action_about)
                 .subcommand(
                     Command::new("list")
-                        .about("List plugin actions")
+                        .about(text.action_list_about)
                         .arg(option("plugin", "ID")),
                 )
                 .subcommand(
                     Command::new("invoke")
-                        .about("Invoke a plugin action")
+                        .about(text.action_invoke_about)
                         .arg(required("action_id", "ACTION_ID"))
                         .arg(option("plugin", "ID")),
                 ),
         )
         .subcommand(
             Command::new("log")
-                .about("Inspect plugin command logs")
+                .about(text.log_about)
                 .visible_alias("logs")
                 .subcommand(
                     Command::new("list")
-                        .about("List plugin command logs")
+                        .about(text.log_list_about)
                         .arg(option("plugin", "ID"))
                         .arg(option("limit", "N")),
                 ),
         )
         .subcommand(
             Command::new("pane")
-                .about("Manage plugin-owned panes")
+                .about(text.pane_about)
                 .subcommand(
                     Command::new("open")
-                        .about("Open a plugin pane")
+                        .about(text.pane_open_about)
                         .arg(option("plugin", "ID"))
                         .arg(option("entrypoint", "ID"))
                         .arg(
@@ -859,12 +869,12 @@ fn plugin_command() -> Command {
                 )
                 .subcommand(
                     Command::new("focus")
-                        .about("Focus a plugin pane")
+                        .about(text.pane_focus_about)
                         .arg(required("pane_id", "PANE_ID")),
                 )
                 .subcommand(
                     Command::new("close")
-                        .about("Close a plugin pane")
+                        .about(text.pane_close_about)
                         .arg(required("pane_id", "PANE_ID")),
                 ),
         )
@@ -1199,6 +1209,21 @@ mod tests {
             .get_arguments()
             .any(|arg| arg.get_long() == Some("entrypoint")));
         assert!(option_values(open, "placement").contains(&"zoomed".to_string()));
+    }
+
+    #[test]
+    fn plugin_spec_uses_simplified_chinese_descriptions() {
+        let cmd = super::command_with_language(crate::config::UiLanguage::ZhCn);
+        let plugin = command_path(&cmd, &["plugin"]);
+        assert_eq!(
+            plugin.get_about().map(ToString::to_string).as_deref(),
+            Some("安装并运行工作流插件")
+        );
+        let install = command_path(&cmd, &["plugin", "install"]);
+        assert_eq!(
+            install.get_about().map(ToString::to_string).as_deref(),
+            Some("从 GitHub 安装插件")
+        );
     }
 
     #[test]
