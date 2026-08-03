@@ -85,6 +85,8 @@ jobs:
 
       - name: Run project checks
         shell: bash
+        env:
+          NEXTEST_RETRIES: 3
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do

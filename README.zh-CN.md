@@ -50,7 +50,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ```bash
 curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh \
-  | HERDR_VERSION=zh-v0.7.5.1 sh
+  | HERDR_VERSION=zh-v0.7.5.2 sh
 ```
 
 Windows 原生版本暂不通过此 shell 安装器分发；Windows 用户推荐在 WSL 中使用。
@@ -162,7 +162,7 @@ just check
 
 - `upstream` 指向 `herdrdev/herdr`。
 - fork `master` 包含中文维护改动并定期同步上游。
-- 中文发布标签使用 `zh-v<上游基础版本>.<中文修订号>`，例如 `zh-v0.7.5.1`。
+- 中文发布标签使用 `zh-v<上游基础版本>.<中文修订号>`，例如 `zh-v0.7.5.2`。
 
 ## 上游文档
 
