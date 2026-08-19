@@ -14,11 +14,12 @@
   <a href="https://github.com/AoManoh/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/AoManoh/herdr?label=中文维护版&labelColor=333333&color=666666" alt="latest Chinese fork release" /></a>
 </p>
 
-> 本仓库是由 AoManoh 维护的 herdr 简体中文版本。它基于 [`herdrdev/herdr`](https://github.com/herdrdev/herdr)，保留上游功能并增加可切换的 English / 简体中文 TUI。它不是 herdr 官方发布渠道。
+> 本仓库是由 AoManoh 维护的 herdr 简体中文版本。当前版本基于上游 [`v0.8.0`](https://github.com/herdrdev/herdr/releases/tag/v0.8.0)，保留上游功能并增加可切换的 English / 简体中文 TUI 与 plugin CLI 汉化。它不是 herdr 官方发布渠道。
 
 ## 主要差异
 
 - 内置简体中文 TUI，覆盖工作区、窗格、设置、快捷键、通知、对话框和移动布局。
+- plugin CLI 的帮助、安装预览、列表、提示和构建诊断会跟随界面语言，JSON/协议字段保持不变。
 - 设置面板提供 `语言 / Language` 分区，可即时预览并写回配置。
 - 中文显示宽度、按钮区域和鼠标命中使用终端列宽计算。
 - fork 使用独立 GitHub Release，不会修改 herdr.dev 或官方更新清单。
@@ -50,7 +51,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ```bash
 curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh \
-  | HERDR_VERSION=zh-v0.7.5.4 sh
+  | HERDR_VERSION=zh-v0.8.0.1 sh
 ```
 
 Windows 原生版本暂不通过此 shell 安装器分发；Windows 用户推荐在 WSL 中使用。
@@ -162,7 +163,7 @@ just check
 
 - `upstream` 指向 `herdrdev/herdr`。
 - fork `master` 包含中文维护改动并定期同步上游。
-- 中文发布标签使用 `zh-v<上游基础版本>.<中文修订号>`，例如 `zh-v0.7.5.4`。
+- 中文发布标签使用 `zh-v<上游基础版本>.<中文修订号>`，例如 `zh-v0.8.0.1`。
 
 ## 上游文档
 

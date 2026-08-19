@@ -1,6 +1,6 @@
 # herdr
 
-> This fork is maintained by AoManoh and adds a switchable English / Simplified Chinese TUI. See [简体中文安装与使用说明](README.zh-CN.md). Quick install: `curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh | sh`.
+> This fork is maintained by AoManoh, tracks upstream `v0.8.0`, and adds a switchable English / Simplified Chinese TUI plus localized plugin CLI output. See [简体中文安装与使用说明](README.zh-CN.md). Quick install: `curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh | sh`.
 
 > Upstream project and official releases: [`herdrdev/herdr`](https://github.com/herdrdev/herdr). Do not use the official `herdr update` command to update this fork.
 

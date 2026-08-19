@@ -27,6 +27,7 @@ jobs:
       base_version: ${{ steps.plan.outputs.base_version }}
       revision: ${{ steps.plan.outputs.revision }}
       build_id: ${{ steps.plan.outputs.build_id }}
+      protocol: ${{ steps.plan.outputs.protocol }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -39,6 +40,8 @@ jobs:
         run: |
           set -euo pipefail
           base_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          protocol="$(sed -n 's/^pub const PROTOCOL_VERSION: u32 = \([0-9][0-9]*\);/\1/p' src/protocol/wire.rs)"
+          test -n "$protocol"
           prefix="zh-v${base_version}."
           case "$GITHUB_REF_NAME" in
             "$prefix"*) revision="${GITHUB_REF_NAME#"$prefix"}" ;;
@@ -57,6 +60,7 @@ jobs:
             echo "base_version=$base_version"
             echo "revision=$revision"
             echo "build_id=zh.$revision"
+            echo "protocol=$protocol"
           } >> "$GITHUB_OUTPUT"
 
       - name: Require successful CI workflow
@@ -278,7 +282,9 @@ jobs:
           cat > RELEASE_NOTES.md <<'EOF'
           ## herdr 简体中文维护版
 
-          本版本由 `AoManoh/herdr` 维护，提供可切换的 English / 简体中文 TUI、设置面板语言选择、中文显示宽度和鼠标命中修正。
+          本版本由 `AoManoh/herdr` 维护，基于上游 [`v${{ needs.verify.outputs.base_version }}`](https://github.com/herdrdev/herdr/releases/tag/v${{ needs.verify.outputs.base_version }})，客户端/服务器协议为 `${{ needs.verify.outputs.protocol }}`。完整上游变更请参阅对应官方 Release。
+
+          中文维护版提供可切换的 English / 简体中文 TUI、设置面板语言选择、plugin CLI 汉化、中文显示宽度和鼠标命中修正；JSON 与协议字段保持不变。
 
           ### 一键安装或升级
 
