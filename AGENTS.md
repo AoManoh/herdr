@@ -159,13 +159,13 @@ When updating libghostty-vt, check every active patch in `vendor/libghostty-vt.p
 
 ## Docs
 
-Stable public docs live in `website/src/content/docs/`. They are the currently released herdr.dev docs. Do not document unreleased behavior there during normal feature or fix work.
+Unreleased docs live in `docs/next/website/src/content/docs/`. Update those when a user-facing change needs docs before the next release. They are committed drafts but are never production website input. `docs/next/README.md` and `docs/next/CHANGELOG.md` stage root README and changelog changes.
 
-Unreleased docs live in `docs/next/website/src/content/docs/`. Update those when a user-facing change needs docs before the next release. `docs/next/README.md` and `docs/next/CHANGELOG.md` stage root README and changelog changes.
+The active preview release docs live in `docs/preview/website/`. Preview CI owns this mutable snapshot and commits it atomically with `website/preview.json`; never edit it manually. Validate it with `node website/scripts/docs-preview.mjs check`.
 
-The website build runs `website/scripts/prepare-docs.mjs`. It keeps stable docs at `/docs/`, generates next docs at `/docs/preview/` from `docs/next/website/src/content/docs/`, and generates immutable release docs from `docs/versions/`. Do not edit generated `website/src/content/docs/preview/` or `website/src/content/docs/_versions/`.
+Immutable stable release snapshots live in `docs/versions/`. The website build generates `/docs/preview/` from the active preview snapshot and `/docs/<version>/` from stable snapshots. The current stable `/docs/` temporarily uses the tracked legacy `website/src/content/docs/` tree; the next stable release switches it to the current immutable snapshot and removes the legacy copy. Do not edit generated preview, version, or snapshot-backed stable files under `website/src/content/docs/`.
 
-During release review, finalize `docs/next` and run `just release-docs-check`. Do not copy next docs into the stable website manually. After the GitHub Release succeeds, release CI snapshots the tagged next docs, promotes them to stable, updates `latest.json`, and deploys them together. Normal feature/fix work should not edit root `README.md`, root `CHANGELOG.md`, stable website docs, or `website/latest.json` unless explicitly requested.
+During release review, finalize `docs/next` and run `just release-docs-check`. Do not copy draft docs into preview or stable manually. Preview CI snapshots the selected commit. After a stable GitHub Release succeeds, release CI snapshots the exact tag, updates `latest.json`, and deploys them together. Normal feature/fix work should not edit root `README.md`, root `CHANGELOG.md`, legacy stable website docs, or `website/latest.json` unless explicitly requested.
 
 Put local PRDs, planning notes, and exploratory specs under `.local/prd/`; `.local/` is ignored and locally controlled.
 
@@ -191,7 +191,7 @@ Do not use GitHub closing keywords like `fixes #<issue-number>`, `closes #<issue
 - Rust platform-specific code must be compile-gated. Put OS APIs and substantial OS behavior in `src/platform/`; when platform checks are needed elsewhere, use `#[cfg(windows)]`, `#[cfg(unix)]`, or target-specific `#[cfg(...)]` on imports, fields, functions, impls, and match arms so Windows-only code does not compile into Unix builds and Unix-only code does not compile into Windows builds. Use `cfg!(...)` only for pure cross-platform policy constants whose branches both compile on every target.
 - Don't add dependencies without a reason. Check whether existing dependencies cover the need first.
 - Integration asset versions (`HERDR_INTEGRATION_VERSION` markers and matching `*_INTEGRATION_VERSION` constants) are migration versions relative to the latest released tag, not per-commit counters on `master`. If an integration asset changes multiple times between releases, bump it once from the version in the latest release.
-- When changing the server/client wire protocol, compare `src/protocol/wire.rs::PROTOCOL_VERSION` against the latest released tag. Bump it only if the current source protocol is not already greater than the latest released protocol. Update hardcoded protocol expectations and manual protocol fixtures in tests.
+- When changing the server/client wire protocol, compare `src/protocol/wire.rs::PROTOCOL_VERSION` against protocols published in both stable and preview releases. Bump it when the current source protocol has already been published in either channel and the wire format changes incompatibly. Do not bump it again for multiple incompatible changes before that protocol is published. Update hardcoded protocol expectations and manual protocol fixtures in tests.
 
 ## Release Channels
 

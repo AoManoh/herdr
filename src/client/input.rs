@@ -39,11 +39,16 @@ pub fn stdin_reader_loop(
     event_tx: mpsc::Sender<ClientLoopEvent>,
     should_quit: &Arc<AtomicBool>,
     host_color_query_sent: bool,
+    host_cell_size_query_sent: bool,
     host_mouse_capture_active: Arc<AtomicBool>,
 ) {
     #[cfg(windows)]
     {
-        let _ = (host_color_query_sent, host_mouse_capture_active);
+        let _ = (
+            host_color_query_sent,
+            host_cell_size_query_sent,
+            host_mouse_capture_active,
+        );
         windows_stdin_reader_loop(event_tx, should_quit);
     }
 
@@ -52,6 +57,7 @@ pub fn stdin_reader_loop(
         event_tx,
         should_quit,
         host_color_query_sent,
+        host_cell_size_query_sent,
         host_mouse_capture_active,
     );
 }
@@ -61,6 +67,7 @@ fn unix_stdin_reader_loop(
     event_tx: mpsc::Sender<ClientLoopEvent>,
     should_quit: &Arc<AtomicBool>,
     host_color_query_sent: bool,
+    host_cell_size_query_sent: bool,
     host_mouse_capture_active: Arc<AtomicBool>,
 ) {
     let stdin = io::stdin();
@@ -70,6 +77,9 @@ fn unix_stdin_reader_loop(
     if host_color_query_sent {
         framer.host_color_query_sent();
         framer.enable_host_color_scheme_change_tracking();
+    }
+    if host_cell_size_query_sent {
+        framer.host_cell_size_query_sent();
     }
     let mut pending_palette = Vec::new();
 
@@ -281,7 +291,16 @@ fn windows_crossterm_input_event(
             code: crate::protocol::ClientKeyCode::Char(codepoint),
             modifiers: 0,
             kind: crate::protocol::ClientKeyKind::Press,
-        } => Some(crate::protocol::ClientInputEvent::Text { codepoint }),
+            source,
+            ..
+        } => Some(crate::protocol::ClientInputEvent::Key {
+            code: crate::protocol::ClientKeyCode::Char(codepoint),
+            modifiers: 0,
+            kind: crate::protocol::ClientKeyKind::Press,
+            repeat_count: 1,
+            generated_text: Some(codepoint.to_string()),
+            source,
+        }),
         event => Some(event),
     }
 }
@@ -368,20 +387,29 @@ fn windows_client_input_event_from_raw(
     event: crate::raw_input::RawInputEvent,
 ) -> Option<crate::protocol::ClientInputEvent> {
     match event {
-        crate::raw_input::RawInputEvent::Key(key) if key.is_text_commit => {
-            let crossterm::event::KeyCode::Char(codepoint) = key.code else {
-                return None;
-            };
-            Some(crate::protocol::ClientInputEvent::Text { codepoint })
-        }
+        crate::raw_input::RawInputEvent::Text(text) => Some(
+            crate::protocol::ClientInputEvent::TextCommit(text.into_string()),
+        ),
         crate::raw_input::RawInputEvent::Key(key) => {
             let code = crate::protocol::ClientKeyCode::from_crossterm(key.code)?;
             let modifiers = key.modifiers.bits();
             let kind = crate::protocol::ClientKeyKind::from_crossterm(key.kind);
+            let source = if let Some(bytes) = key.vt_bytes() {
+                crate::protocol::ClientKeySource::Vt {
+                    bytes: bytes.to_vec(),
+                }
+            } else if let Some(record) = key.windows_record() {
+                crate::protocol::ClientKeySource::WindowsConsole { record }
+            } else {
+                crate::protocol::ClientKeySource::Synthesized
+            };
             Some(crate::protocol::ClientInputEvent::Key {
                 code,
                 modifiers,
                 kind,
+                repeat_count: key.repeat_count,
+                generated_text: key.generated_text.clone(),
+                source,
             })
         }
         crate::raw_input::RawInputEvent::Mouse(mouse) => {
@@ -404,6 +432,7 @@ fn windows_client_input_event_from_raw(
         crate::raw_input::RawInputEvent::HostDefaultColor { .. }
         | crate::raw_input::RawInputEvent::HostPaletteColors { .. }
         | crate::raw_input::RawInputEvent::HostColorSchemeChanged(_)
+        | crate::raw_input::RawInputEvent::HostCellSizeReport { .. }
         | crate::raw_input::RawInputEvent::Unsupported => None,
     }
 }
@@ -573,12 +602,19 @@ mod windows_tests {
     }
 
     #[test]
-    fn windows_crossterm_printable_press_is_text() {
+    fn windows_crossterm_printable_press_keeps_key_semantics_and_text() {
         let event = Event::Key(KeyEvent::new(KeyCode::Char('你'), KeyModifiers::empty()));
 
         assert_eq!(
             windows_crossterm_input_event(event),
-            Some(crate::protocol::ClientInputEvent::Text { codepoint: '你' })
+            Some(crate::protocol::ClientInputEvent::Key {
+                code: crate::protocol::ClientKeyCode::Char('你'),
+                modifiers: 0,
+                kind: crate::protocol::ClientKeyKind::Press,
+                repeat_count: 1,
+                generated_text: Some("你".to_string()),
+                source: crate::protocol::ClientKeySource::Synthesized,
+            })
         );
     }
 
@@ -673,6 +709,9 @@ mod windows_tests {
                 code: crate::protocol::ClientKeyCode::Char('d'),
                 modifiers: KeyModifiers::CONTROL.bits(),
                 kind: crate::protocol::ClientKeyKind::Press,
+                repeat_count: 1,
+                generated_text: None,
+                source: crate::protocol::ClientKeySource::Vt { bytes: vec![4] },
             }
         );
     }
@@ -693,6 +732,11 @@ mod windows_tests {
                 code: crate::protocol::ClientKeyCode::Up,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                repeat_count: 1,
+                generated_text: None,
+                source: crate::protocol::ClientKeySource::Vt {
+                    bytes: b"\x1b[A".to_vec()
+                },
             }
         );
     }
@@ -712,6 +756,9 @@ mod windows_tests {
                 code: crate::protocol::ClientKeyCode::Esc,
                 modifiers: 0,
                 kind: crate::protocol::ClientKeyKind::Press,
+                repeat_count: 1,
+                generated_text: None,
+                source: crate::protocol::ClientKeySource::Vt { bytes: vec![0x1b] },
             }
         );
     }

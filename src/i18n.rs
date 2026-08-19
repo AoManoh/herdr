@@ -53,33 +53,13 @@ pub(crate) fn settings_section_label(
         (UiLanguage::En, SettingsSection::Sound) => "sound",
         (UiLanguage::En, SettingsSection::Toast) => "toasts",
         (UiLanguage::En, SettingsSection::PaneLabels) => "labels",
-        (UiLanguage::En, SettingsSection::Experiments) => "experiments",
         (UiLanguage::En, SettingsSection::Integrations) => "agents",
         (UiLanguage::ZhCn, SettingsSection::Language) => "语言",
         (UiLanguage::ZhCn, SettingsSection::Theme) => "主题",
         (UiLanguage::ZhCn, SettingsSection::Sound) => "声音",
         (UiLanguage::ZhCn, SettingsSection::Toast) => "通知",
         (UiLanguage::ZhCn, SettingsSection::PaneLabels) => "窗格标签",
-        (UiLanguage::ZhCn, SettingsSection::Experiments) => "实验功能",
         (UiLanguage::ZhCn, SettingsSection::Integrations) => "集成",
-    }
-}
-
-pub(crate) fn experiment_label(
-    language: UiLanguage,
-    setting: crate::app::state::ExperimentSetting,
-) -> &'static str {
-    use crate::app::state::ExperimentSetting;
-
-    match (language, setting) {
-        (UiLanguage::En, ExperimentSetting::PaneHistory) => "pane screen history",
-        (UiLanguage::En, ExperimentSetting::SwitchAsciiInputSourceInPrefix) => {
-            "switch to ascii input source in prefix (macOS/Windows)"
-        }
-        (UiLanguage::ZhCn, ExperimentSetting::PaneHistory) => "保存窗格屏幕历史",
-        (UiLanguage::ZhCn, ExperimentSetting::SwitchAsciiInputSourceInPrefix) => {
-            "进入前缀模式时切换为英文输入法（macOS/Windows）"
-        }
     }
 }
 
@@ -778,7 +758,6 @@ pub(crate) struct SettingsText {
     pub integrations_description: &'static str,
     pub no_integration_targets: &'static str,
     pub on: &'static str,
-    pub optional_features: &'static str,
 }
 
 const SETTINGS_EN: SettingsText = SettingsText {
@@ -810,7 +789,6 @@ const SETTINGS_EN: SettingsText = SettingsText {
         "let agents report state directly instead of relying only on process detection",
     no_integration_targets: " no integration targets available",
     on: "on",
-    optional_features: "optional features that are off by default",
 };
 
 const SETTINGS_ZH_CN: SettingsText = SettingsText {
@@ -841,7 +819,6 @@ const SETTINGS_ZH_CN: SettingsText = SettingsText {
     integrations_description: "让智能体直接报告状态，而不只依赖进程检测",
     no_integration_targets: " 没有可用的集成目标",
     on: "开启",
-    optional_features: "以下可选功能默认关闭",
 };
 
 pub(crate) fn settings_text(language: UiLanguage) -> &'static SettingsText {

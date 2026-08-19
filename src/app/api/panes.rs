@@ -57,6 +57,7 @@ impl App {
         let default_shell = self.state.default_shell.clone();
         let scrollback_limit_bytes = self.state.pane_scrollback_limit_bytes;
         let host_terminal_theme = self.state.host_terminal_theme;
+        let host_terminal_appearance = self.state.host_terminal_appearance;
         let previous_focus = self.state.current_pane_focus_target();
         let Some(ws) = self.state.workspaces.get_mut(ws_idx) else {
             return encode_error(id, "pane_not_found", "pane not found");
@@ -76,6 +77,7 @@ impl App {
                 split_cwd,
                 scrollback_limit_bytes,
                 host_terminal_theme,
+                host_terminal_appearance,
                 shell_config,
                 extra_env,
                 params.focus,
@@ -88,6 +90,7 @@ impl App {
                 split_cwd,
                 scrollback_limit_bytes,
                 host_terminal_theme,
+                host_terminal_appearance,
                 shell_config,
                 extra_env,
                 params.focus,
@@ -2013,6 +2016,7 @@ mod tests {
                 lines: Some(2),
                 format: crate::api::schema::ReadFormat::Text,
                 strip_ansi: true,
+                intent: crate::api::schema::ReadIntent::Interactive,
             },
         );
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
@@ -2677,7 +2681,7 @@ mod tests {
             rx.try_recv().expect("forwarded release after pane move"),
             bytes::Bytes::from_static(b"\x1b[106;1:3u")
         );
-        assert!(app.pressed_terminal_keys.is_empty());
+        assert!(app.input_leases.is_empty());
     }
 
     #[test]
