@@ -64,11 +64,11 @@ def installer_env(home: pathlib.Path, base_url: str):
 
 FRESH_BINARY = """#!/bin/sh
 if [ "${1:-}" = "--version" ]; then
-  echo "herdr 0.7.5-fork.zh.1"
+  echo "herdr 0.8.0-fork.zh.1"
   exit 0
 fi
 if [ "${1:-}" = "status" ] && [ "${2:-}" = "client" ]; then
-  echo '{"version":"0.7.5-fork.zh.1","protocol":18}'
+  echo '{"version":"0.8.0-fork.zh.1","protocol":19}'
   exit 0
 fi
 exit 0
@@ -181,15 +181,15 @@ exit 0
             )
             new_binary = """#!/bin/sh
 if [ "${1:-}" = "--version" ]; then
-  echo "herdr 0.7.5-fork.zh.1"
+  echo "herdr 0.8.0-fork.zh.1"
   exit 0
 fi
 if [ "${1:-}" = "status" ] && [ "${2:-}" = "client" ]; then
-  echo '{"version":"0.7.5-fork.zh.1","protocol":18}'
+  echo '{"version":"0.8.0-fork.zh.1","protocol":19}'
   exit 0
 fi
 if [ "${1:-}" = "server" ] && [ "${2:-}" = "live-handoff" ]; then
-  printf '%s\n' "$*" > "$HERDR_FAKE_LOG"
+  printf '%s\n' "$0 $*" > "$HERDR_FAKE_LOG"
   exit 0
 fi
 exit 0
@@ -204,8 +204,60 @@ exit 0
                 )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("server live-handoff", log.read_text(encoding="utf-8"))
+            handoff = log.read_text(encoding="utf-8")
+            self.assertIn("server live-handoff", handoff)
+            self.assertIn(f"--import-exe {old}", handoff)
+            self.assertNotIn(".herdr-install-", handoff)
             self.assertEqual(old.read_text(encoding="utf-8"), new_binary)
+            self.assertEqual(len(list((home / "bin").glob("herdr.backup-*"))), 1)
+
+    def test_failed_live_handoff_restores_old_binary(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            release = root / "release"
+            home = root / "home"
+            release.mkdir()
+            (home / "bin").mkdir(parents=True)
+            old_content = """#!/bin/sh
+if [ "${1:-}" = "session" ]; then
+  echo '{"sessions":[{"default":true,"running":true}]}'
+  exit 0
+fi
+if [ "${1:-}" = "status" ]; then
+  echo '{"server":{"running":true}}'
+  exit 0
+fi
+exit 0
+"""
+            old = home / "bin" / "herdr"
+            write_executable(old, old_content)
+            failing_binary = """#!/bin/sh
+if [ "${1:-}" = "--version" ]; then
+  echo "herdr 0.8.0-fork.zh.1"
+  exit 0
+fi
+if [ "${1:-}" = "status" ] && [ "${2:-}" = "client" ]; then
+  echo '{"version":"0.8.0-fork.zh.1","protocol":19}'
+  exit 0
+fi
+if [ "${1:-}" = "server" ] && [ "${2:-}" = "live-handoff" ]; then
+  exit 1
+fi
+exit 0
+"""
+            write_release(release, failing_binary)
+
+            with ReleaseServer(release) as server:
+                result = subprocess.run(
+                    ["sh", str(INSTALLER)],
+                    env=installer_env(home, server.url),
+                    text=True,
+                    capture_output=True,
+                )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(old.read_text(encoding="utf-8"), old_content)
+            self.assertIn("旧二进制已恢复", result.stderr)
             self.assertEqual(len(list((home / "bin").glob("herdr.backup-*"))), 1)
 
 

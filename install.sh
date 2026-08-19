@@ -132,19 +132,24 @@ main() {
                 die "无法读取新二进制的版本或协议"
             fi
 
-            log "正在通过 live-handoff 保留运行中的 panes"
-            clean_herdr_env "$STAGE" server live-handoff \
-                --import-exe "$STAGE" \
-                --expected-protocol "$new_protocol" \
-                --expected-version "$new_version" \
-                || die "live-handoff 失败，旧二进制和 server 保持不变"
-
             mv -f "$STAGE" "$destination" \
-                || {
-                    STAGE=""
-                    die "handoff 已完成，但无法替换 $destination；新 server 仍从 staging 路径运行"
-                }
+                || die "无法将新二进制安装到 $destination；旧 server 保持不变"
             STAGE=""
+
+            log "正在通过 live-handoff 保留运行中的 panes"
+            if ! clean_herdr_env "$destination" server live-handoff \
+                --import-exe "$destination" \
+                --expected-protocol "$new_protocol" \
+                --expected-version "$new_version"
+            then
+                STAGE="${INSTALL_DIR}/.herdr-rollback-$$"
+                cp -p "$backup" "$STAGE" \
+                    || die "live-handoff 失败，且无法从 $backup 准备旧二进制"
+                mv -f "$STAGE" "$destination" \
+                    || die "live-handoff 失败，且无法从 $backup 恢复旧二进制"
+                STAGE=""
+                die "live-handoff 失败；旧二进制已恢复，旧 server 保持不变"
+            fi
         else
             STAGE="${INSTALL_DIR}/.herdr-install-$$"
             cp "${TMP}/${BIN}" "$STAGE"
