@@ -20,6 +20,8 @@ Herdr 为同时运行多个编程智能体而生。每个智能体都待在一�
 | Kimi Code CLI | 安装后为生命周期钩子;否则为屏幕清单 | 状态与会话 |
 | Hermes Agent | 屏幕清单 | 会话 |
 | Qoder CLI | 屏幕清单 | 会话 |
+| Qwen Code | 屏幕清单 | 会话 |
+| Letta Code | 屏幕清单 | 会话 |
 | Droid | 屏幕清单 | 会话 |
 | OpenCode | 安装后为生命周期插件;否则为屏幕清单 | 状态与会话 |
 | Kilo Code CLI | 安装后为生命周期插件;否则为屏幕清单 | 状态与会话 |
@@ -32,6 +34,7 @@ Herdr 为同时运行多个编程智能体而生。每个智能体都待在一�
 | Antigravity CLI | 屏幕清单 | 会话 |
 | Kiro CLI | 屏幕清单 | 无 |
 | Maki | 屏幕清单 | 无 |
+| Muse | 屏幕清单 | 无 |
 
 可检测但测试较少: Gemini CLI 和 Cline。不受支持的智能体仍然可以作为普通终端进程正常运行,只是在你添加集成或通过 socket API 上报状态之前,可能得不到丰富的状态。
 
@@ -103,7 +106,7 @@ herdr integration install claude
 herdr integration status
 ```
 
-每个受支持的智能体都有自己的集成名称和行为。按智能体的细节和完整安装列表见[集成](/zh-cn/docs/integrations/)。
+每个受支持的智能体都有自己的集成名称和行为。按智能体的细节和完整安装列表见[集成](/zh-cn/docs/integrations/)。如果你正在构建智能体,[自定义集成指南](/zh-cn/docs/integrations/#集成你自己的智能体)介绍了如何在不为 Herdr 添加原生支持的情况下上报生命周期状态。
 
 ## 自定义智能体标签
 

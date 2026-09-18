@@ -14,13 +14,14 @@
   <a href="https://github.com/AoManoh/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/AoManoh/herdr?label=中文维护版&labelColor=333333&color=666666" alt="latest Chinese fork release" /></a>
 </p>
 
-> 本仓库是由 AoManoh 维护的 herdr 简体中文版本。当前版本基于上游 [`v0.8.0`](https://github.com/herdrdev/herdr/releases/tag/v0.8.0)，保留上游功能并增加可切换的 English / 简体中文 TUI 与 plugin CLI 汉化。它不是 herdr 官方发布渠道。
+> 本仓库是由 AoManoh 维护的 herdr 简体中文版本。当前版本基于上游 [`v0.9.1`](https://github.com/herdrdev/herdr/releases/tag/v0.9.1)，保留上游功能并增加可切换的 English / 简体中文 TUI 与 plugin CLI 汉化。它不是 herdr 官方发布渠道。
 
 ## 主要差异
 
 - 内置简体中文 TUI，覆盖工作区、窗格、设置、快捷键、通知、对话框和移动布局。
 - plugin CLI 的帮助、安装预览、列表、提示和构建诊断会跟随界面语言，JSON/协议字段保持不变。
 - 设置面板提供 `语言 / Language` 分区，可即时预览并写回配置。
+- 支持本地与已保存 SSH 机器的统一工作区/智能体视图，远程机器状态会跟随连接状态显示。
 - 中文显示宽度、按钮区域和鼠标命中使用终端列宽计算。
 - fork 使用独立 GitHub Release，不会修改 herdr.dev 或官方更新清单。
 
@@ -51,7 +52,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ```bash
 curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh \
-  | HERDR_VERSION=zh-v0.8.0.1 sh
+  | HERDR_VERSION=zh-v0.9.1.1 sh
 ```
 
 Windows 原生版本暂不通过此 shell 安装器分发；Windows 用户推荐在 WSL 中使用。
@@ -153,7 +154,7 @@ cd herdr
 cargo build --release --locked
 ```
 
-构建环境由 `rust-toolchain.toml` 固定为 Rust 1.96.1，并需要 Zig 0.15.2。完整验证：
+构建环境由 `rust-toolchain.toml` 固定为 Rust 1.96.1，并需要 Zig 0.16.0。完整验证：
 
 ```bash
 just check
@@ -163,7 +164,7 @@ just check
 
 - `upstream` 指向 `herdrdev/herdr`。
 - fork `master` 包含中文维护改动并定期同步上游。
-- 中文发布标签使用 `zh-v<上游基础版本>.<中文修订号>`，例如 `zh-v0.8.0.1`。
+- 中文发布标签使用 `zh-v<上游基础版本>.<中文修订号>`，例如 `zh-v0.9.1.1`。
 
 ## 上游文档
 
@@ -174,6 +175,7 @@ just check
 - [键盘](https://herdr.dev/zh-cn/docs/keyboard/)
 - [配置](https://herdr.dev/zh-cn/docs/configuration/)
 - [会话状态与恢复](https://herdr.dev/zh-cn/docs/session-state/)
+- [连接机器](https://herdr.dev/zh-cn/docs/connecting-machines/)
 - [远程访问](https://herdr.dev/zh-cn/docs/persistence-remote/)
 - [插件](https://herdr.dev/zh-cn/docs/plugins/)
 - [Socket API](https://herdr.dev/zh-cn/docs/socket-api/)

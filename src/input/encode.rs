@@ -16,7 +16,29 @@ pub fn encode_key(key: KeyEvent, protocol: KeyboardProtocol) -> Vec<u8> {
 }
 
 pub fn encode_terminal_key(key: TerminalKey, protocol: KeyboardProtocol) -> Vec<u8> {
-    if key.kind != crossterm::event::KeyEventKind::Release {
+    // The host layout has not committed text for this Windows dead key. Neither
+    // legacy nor Kitty panes should receive its physical character fallback.
+    // Legacy Windows panes take the native ConPTY fallback before reaching this encoder.
+    if key.is_windows_dead_key() {
+        return Vec::new();
+    }
+
+    // Super has no legacy character encoding. Preserve the chord with CSI-u
+    // instead of leaking the unmodified character into the pane.
+    if matches!(protocol, KeyboardProtocol::Legacy)
+        && key.kind != crossterm::event::KeyEventKind::Release
+        && matches!(key.code, KeyCode::Char(_))
+        && key.modifiers.contains(KeyModifiers::SUPER)
+    {
+        if let Some(bytes) = try_encode_csi_u(&key, 0) {
+            return bytes;
+        }
+    }
+
+    // REPORT_ALL_KEYS must retain physical press/repeat/release semantics instead of
+    // reducing a native key to its layout-generated text.
+    let preserve_physical_key = key.has_physical_identity() && protocol.reports_all_keys();
+    if !preserve_physical_key && key.kind != crossterm::event::KeyEventKind::Release {
         if let Some(text) = &key.generated_text {
             return text.as_bytes().to_vec();
         }
@@ -125,7 +147,7 @@ fn encode_mouse_cb(
     encoding: MouseProtocolEncoding,
 ) -> Option<Vec<u8>> {
     let mut cb = match (encoding, release) {
-        (MouseProtocolEncoding::Sgr, true) => base_button,
+        (MouseProtocolEncoding::Sgr | MouseProtocolEncoding::SgrPixels, true) => base_button,
         (_, true) => 3,
         (_, false) => base_button,
     };
@@ -143,7 +165,7 @@ fn encode_mouse_cb(
     let row = row as u32 + 1;
 
     match encoding {
-        MouseProtocolEncoding::Sgr => Some(
+        MouseProtocolEncoding::Sgr | MouseProtocolEncoding::SgrPixels => Some(
             format!(
                 "\x1b[<{cb};{column};{row}{}",
                 if release { 'm' } else { 'M' }
@@ -491,7 +513,7 @@ fn encode_legacy_inner(key: TerminalKey) -> Vec<u8> {
                     ']' | '5' => vec![29],
                     '^' | '6' => vec![30],
                     '_' | '/' | '7' | '-' => vec![31],
-                    _ => vec![ch as u8],
+                    _ => ch.to_string().into_bytes(),
                 }
             } else {
                 let ch = if key.modifiers == KeyModifiers::SHIFT {
@@ -562,6 +584,36 @@ mod tests {
     }
 
     #[test]
+    fn kitty_all_keys_does_not_encode_windows_altgr_dead_key_phases() {
+        use crossterm::event::KeyEventKind;
+
+        let key = TerminalKey::new(KeyCode::Char('4'), KeyModifiers::empty()).with_windows_record(
+            crate::input::WindowsKeyRecord {
+                key_down: true,
+                repeat_count: 1,
+                virtual_key_code: 52,
+                virtual_scan_code: 5,
+                unicode: 0,
+                control_key_state: 9,
+            },
+        );
+        for kind in [
+            KeyEventKind::Press,
+            KeyEventKind::Repeat,
+            KeyEventKind::Release,
+        ] {
+            assert!(
+                encode_terminal_key(
+                    key.clone().with_kind(kind),
+                    KeyboardProtocol::Kitty { flags: 31 },
+                )
+                .is_empty(),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
     fn legacy_enter() {
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
         assert_eq!(encode_key(key, KeyboardProtocol::Legacy), vec![b'\r']);
@@ -577,6 +629,12 @@ mod tests {
     fn legacy_ctrl_slash_aliases_ctrl_underscore() {
         let key = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL);
         assert_eq!(encode_key(key, KeyboardProtocol::Legacy), vec![31]);
+    }
+
+    #[test]
+    fn legacy_ctrl_non_ascii_char_uses_utf8() {
+        let key = KeyEvent::new(KeyCode::Char('ß'), KeyModifiers::CONTROL);
+        assert_eq!(encode_key(key, KeyboardProtocol::Legacy), "ß".as_bytes());
     }
 
     #[test]
@@ -1147,6 +1205,19 @@ mod tests {
                 parse_terminal_key_sequence(std::str::from_utf8(&encoded).unwrap()).unwrap();
             assert_terminal_key_eq(parsed, key.code, key.modifiers, key.kind, None);
         }
+    }
+
+    #[test]
+    fn legacy_super_character_preserves_csi_u_chord() {
+        let sequence = "\x1b[99;9u";
+        let key = parse_terminal_key_sequence(sequence).expect("Super+C CSI-u key");
+
+        assert_eq!(key.code, KeyCode::Char('c'));
+        assert_eq!(key.modifiers, KeyModifiers::SUPER);
+        assert_eq!(
+            encode_terminal_key(key, KeyboardProtocol::Legacy),
+            sequence.as_bytes()
+        );
     }
 
     #[test]

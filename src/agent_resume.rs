@@ -69,11 +69,30 @@ pub fn session_ref_from_report(
     agent_session_id.and_then(AgentSessionRef::id)
 }
 
+pub fn persisted_session_from_launch_args(
+    agent: crate::detect::Agent,
+    args: &[String],
+) -> Option<PersistedAgentSession> {
+    let [command, session_id] = args else {
+        return None;
+    };
+    if agent != crate::detect::Agent::Codex || command != "resume" || session_id.starts_with('-') {
+        return None;
+    }
+
+    Some(PersistedAgentSession {
+        source: "herdr:codex".into(),
+        agent: "codex".into(),
+        session_ref: AgentSessionRef::id(session_id.clone())?,
+    })
+}
+
 pub fn normalize_session_start_source(value: Option<String>) -> Option<String> {
     match value.as_deref().map(str::trim) {
-        Some(source @ ("startup" | "resume" | "clear" | "compact" | "new" | "fork")) => {
-            Some(source.to_string())
-        }
+        Some(
+            source @ ("startup" | "resume" | "clear" | "compact" | "branch" | "new" | "fork"
+            | "select"),
+        ) => Some(source.to_string()),
         _ => None,
     }
 }
@@ -87,6 +106,7 @@ pub fn is_reserved_native_state_source(source: &str, agent: &str) -> bool {
             | ("herdr:devin", "devin")
             | ("herdr:droid", "droid")
             | ("herdr:qodercli", "qodercli")
+            | ("herdr:qwen", "qwen")
             | ("herdr:cursor", "cursor")
             | ("herdr:grok", "grok")
     )
@@ -177,12 +197,20 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
                 session_ref.value.clone(),
             ]
         }
+        ("herdr:qwen", "qwen", AgentSessionRefKind::Id) => {
+            vec!["qwen".into(), "--resume".into(), session_ref.value.clone()]
+        }
         ("herdr:kilo", "kilo", AgentSessionRefKind::Id) => {
             vec!["kilo".into(), "--session".into(), session_ref.value.clone()]
         }
         ("herdr:cursor", "cursor", AgentSessionRefKind::Id) => {
             vec![
-                "cursor-agent".into(),
+                if cfg!(windows) {
+                    "cursor-agent.cmd"
+                } else {
+                    "cursor-agent"
+                }
+                .into(),
                 "--resume".into(),
                 session_ref.value.clone(),
             ]
@@ -196,6 +224,26 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
         }
         ("herdr:grok", "grok", AgentSessionRefKind::Id) => {
             vec!["grok".into(), "--resume".into(), session_ref.value.clone()]
+        }
+        ("herdr:letta", "letta", AgentSessionRefKind::Id) => {
+            if let Some(agent_id) = session_ref.value.strip_prefix("default:") {
+                if agent_id.is_empty() {
+                    return None;
+                }
+                vec![
+                    "letta".into(),
+                    "--conversation".into(),
+                    "default".into(),
+                    "--agent".into(),
+                    agent_id.into(),
+                ]
+            } else {
+                vec![
+                    "letta".into(),
+                    "--conversation".into(),
+                    session_ref.value.clone(),
+                ]
+            }
         }
         _ => return None,
     };
@@ -229,10 +277,12 @@ pub(crate) fn is_official_agent_source(source: &str, agent: &str) -> bool {
             | ("herdr:hermes", "hermes")
             | ("herdr:opencode", "opencode")
             | ("herdr:qodercli", "qodercli")
+            | ("herdr:qwen", "qwen")
             | ("herdr:kilo", "kilo")
             | ("herdr:cursor", "cursor")
             | ("herdr:antigravity_cli", "agy")
             | ("herdr:grok", "grok")
+            | ("herdr:letta", "letta")
     )
 }
 
@@ -269,6 +319,40 @@ mod tests {
             "herdr:opencode",
             "opencode"
         ));
+    }
+
+    #[test]
+    fn codex_noncanonical_resume_launch_has_no_explicit_session() {
+        assert_eq!(
+            persisted_session_from_launch_args(
+                crate::detect::Agent::Codex,
+                &["resume".into(), "codex-session".into()]
+            )
+            .unwrap()
+            .session_ref
+            .value,
+            "codex-session"
+        );
+        assert!(persisted_session_from_launch_args(
+            crate::detect::Agent::Codex,
+            &["resume".into(), "--last".into()]
+        )
+        .is_none());
+        assert!(persisted_session_from_launch_args(
+            crate::detect::Agent::Codex,
+            &["resume".into(), "not-a-session".into(), "--last".into()]
+        )
+        .is_none());
+        assert!(persisted_session_from_launch_args(
+            crate::detect::Agent::Codex,
+            &[
+                "--remote".into(),
+                "ws://example.test".into(),
+                "resume".into(),
+                "remote-session".into(),
+            ]
+        )
+        .is_none());
     }
 
     #[test]
@@ -397,6 +481,16 @@ mod tests {
         );
         assert_eq!(
             plan(
+                "herdr:qwen",
+                "qwen",
+                &AgentSessionRef::id("qwen-session").unwrap()
+            )
+            .unwrap()
+            .argv,
+            vec!["qwen", "--resume", "qwen-session"]
+        );
+        assert_eq!(
+            plan(
                 "herdr:kilo",
                 "kilo",
                 &AgentSessionRef::id("kilo-session").unwrap()
@@ -413,7 +507,15 @@ mod tests {
             )
             .unwrap()
             .argv,
-            vec!["cursor-agent", "--resume", "cursor-session"]
+            vec![
+                if cfg!(windows) {
+                    "cursor-agent.cmd"
+                } else {
+                    "cursor-agent"
+                },
+                "--resume",
+                "cursor-session",
+            ]
         );
         assert_eq!(
             plan(
@@ -435,6 +537,32 @@ mod tests {
             .argv,
             vec!["grok", "--resume", "grok-session"]
         );
+        assert_eq!(
+            plan(
+                "herdr:letta",
+                "letta",
+                &AgentSessionRef::id("conversation-123").unwrap()
+            )
+            .unwrap()
+            .argv,
+            vec!["letta", "--conversation", "conversation-123"]
+        );
+        assert_eq!(
+            plan(
+                "herdr:letta",
+                "letta",
+                &AgentSessionRef::id("default:agent-123").unwrap()
+            )
+            .unwrap()
+            .argv,
+            vec!["letta", "--conversation", "default", "--agent", "agent-123"]
+        );
+        assert!(plan(
+            "herdr:letta",
+            "letta",
+            &AgentSessionRef::id("default:").unwrap()
+        )
+        .is_none());
     }
 
     #[test]
@@ -563,6 +691,11 @@ mod tests {
         assert_eq!(session_ref.value, "qoder-id");
 
         let session_ref =
+            session_ref_from_report("herdr:qwen", "qwen", Some("qwen-id".into()), None).unwrap();
+        assert_eq!(session_ref.kind, AgentSessionRefKind::Id);
+        assert_eq!(session_ref.value, "qwen-id");
+
+        let session_ref =
             session_ref_from_report("herdr:antigravity_cli", "agy", Some("agy-id".into()), None)
                 .unwrap();
         assert_eq!(session_ref.kind, AgentSessionRefKind::Id);
@@ -588,12 +721,20 @@ mod tests {
             Some("compact".into())
         );
         assert_eq!(
+            normalize_session_start_source(Some("branch".into())),
+            Some("branch".into())
+        );
+        assert_eq!(
             normalize_session_start_source(Some("new".into())),
             Some("new".into())
         );
         assert_eq!(
             normalize_session_start_source(Some("fork".into())),
             Some("fork".into())
+        );
+        assert_eq!(
+            normalize_session_start_source(Some("select".into())),
+            Some("select".into())
         );
         assert_eq!(
             normalize_session_start_source(Some(" resume ".into())),

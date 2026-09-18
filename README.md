@@ -1,15 +1,12 @@
 # herdr
 
-> This fork is maintained by AoManoh, tracks upstream `v0.8.0`, and adds a switchable English / Simplified Chinese TUI plus localized plugin CLI output. See [简体中文安装与使用说明](README.zh-CN.md). Quick install: `curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh | sh`.
-
-> Upstream project and official releases: [`herdrdev/herdr`](https://github.com/herdrdev/herdr). Do not use the official `herdr update` command to update this fork.
 
 <p align="center">
   <img src="assets/logo.png" alt="herdr" width="100" />
 </p>
 
 <p align="center">
-  <a href="https://herdr.dev">herdr.dev</a> · <a href="#install">install</a> · <a href="https://herdr.dev/docs/quick-start/">quick start</a> · <a href="https://herdr.dev/docs/">docs</a> · <a href="#sponsors">sponsors</a>
+  <a href="https://herdr.dev">herdr.dev</a> · <a href="#install">install</a> · <a href="https://herdr.dev/docs/quick-start/">quick start</a> · <a href="https://herdr.dev/docs/">docs</a>
 </p>
 
 <p align="center">
@@ -18,20 +15,24 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-666666?labelColor=333333" alt="Apache 2.0 license" /></a>
-  <a href="https://github.com/AoManoh/herdr/releases"><img src="https://img.shields.io/github/downloads/AoManoh/herdr/total?labelColor=333333&color=666666" alt="fork release downloads" /></a>
-  <a href="https://github.com/AoManoh/herdr/stargazers"><img src="https://img.shields.io/github/stars/AoManoh/herdr?labelColor=333333&color=666666&logo=github" alt="fork GitHub stars" /></a>
-  <a href="https://github.com/AoManoh/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/AoManoh/herdr?label=Chinese%20fork&labelColor=333333&color=666666" alt="latest Chinese fork release" /></a>
+  <a href="https://github.com/herdrdev/herdr/releases"><img src="https://img.shields.io/github/downloads/herdrdev/herdr/total?labelColor=333333&color=666666" alt="total GitHub release downloads" /></a>
+  <a href="https://github.com/herdrdev/herdr/stargazers"><img src="https://img.shields.io/github/stars/herdrdev/herdr?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/herdrdev/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/herdrdev/herdr?label=release&labelColor=333333&color=666666" alt="latest stable release" /></a>
+  <a href="https://formulae.brew.sh/formula/herdr"><img src="https://img.shields.io/homebrew/v/herdr?label=homebrew&labelColor=333333&color=666666" alt="Homebrew version" /></a>
+  <a href="https://x.com/herdrdev"><img src="https://img.shields.io/badge/follow-%40herdrdev-000000?logo=x&logoColor=white" alt="follow @herdrdev on X" /></a>
 </p>
 
 ---
 
 https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
 
-**agent multiplexer that lives in your terminal.**
+**the runtime your coding agents live on.**
 
-- **every agent at a glance** — blocked, working, done. real terminal views, not a wrapped interpretation.
-- **detach, agents keep running** — reattach from any terminal, or over ssh. sessions survive restarts.
-- **agents can use herdr too** — a pure socket api: agents spawn panes, read output, wait on each other. [agent skill →](https://herdr.dev/docs/agent-skill/)
+- **detach without stopping work** — herdr keeps terminals running in a background server when you close the client or lose your SSH connection. after a server or machine restart, herdr restores the saved layout and can resume supported agent sessions; the original processes do not survive. [session state →](https://herdr.dev/docs/session-state/)
+- **several machines, one window** — keep local work and saved ssh machines together, with a combined agent list and independent reconnects. [remote machines →](https://herdr.dev/docs/connecting-machines/)
+- **never hunt for the stuck one** — every pane is marked working, blocked, or idle. when an agent stops and needs an answer, herdr says so.
+- **agent-native** — agents drive herdr through the cli and socket api: they can spawn panes, prompt each other, and wait until another agent is genuinely blocked. [agent skill →](https://herdr.dev/docs/agent-skill/)
+- **runs what you already run** — claude code, codex, cursor, opencode, grok and the rest. herdr doesn't wrap or replace them; it owns their terminals.
 - **keyboard and mouse, both first-class** — tmux-style prefix keys *and* click, drag, split. pick per moment, not per tool.
 - **plugins** — extend panes and workflows. [browse the marketplace →](https://herdr.dev/plugins/)
 - **one rust binary, no electron** — runs in whatever terminal you already use.
@@ -41,10 +42,10 @@ https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
 ## install
 
 ```bash
-curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh | sh
+curl -fsSL https://herdr.dev/install.sh | sh
 ```
 
-The installer supports Linux/WSL and macOS on x86_64 or aarch64, verifies SHA-256 checksums, and safely hands off a running default session. See [the Chinese guide](README.zh-CN.md) or download [release binaries](https://github.com/AoManoh/herdr/releases).
+or `brew install herdr` · `mise use -g herdr` · windows: `powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"` · [endpoint-protected Windows](https://herdr.dev/docs/windows-beta/) · [binaries](https://github.com/herdrdev/herdr/releases)
 
 then start it where the work lives:
 
@@ -56,17 +57,13 @@ run your agents, split panes, walk away. `ctrl+b q` detaches, `herdr` reattaches
 
 ## docs
 
-everything lives at [herdr.dev/docs](https://herdr.dev/docs/): [quick start](https://herdr.dev/docs/quick-start/) · [concepts](https://herdr.dev/docs/concepts/) · [supported agents](https://herdr.dev/docs/agents/) · [keyboard](https://herdr.dev/docs/keyboard/) · [configuration](https://herdr.dev/docs/configuration/) · [session state](https://herdr.dev/docs/session-state/) · [remote](https://herdr.dev/docs/persistence-remote/) · [integrations](https://herdr.dev/docs/integrations/) · [plugins](https://herdr.dev/docs/plugins/) · [socket api](https://herdr.dev/docs/socket-api/)
+everything lives at [herdr.dev/docs](https://herdr.dev/docs/): [quick start](https://herdr.dev/docs/quick-start/) · [concepts](https://herdr.dev/docs/concepts/) · [supported agents](https://herdr.dev/docs/agents/) · [keyboard](https://herdr.dev/docs/keyboard/) · [configuration](https://herdr.dev/docs/configuration/) · [session state](https://herdr.dev/docs/session-state/) · [connecting machines](https://herdr.dev/docs/connecting-machines/) · [remote](https://herdr.dev/docs/persistence-remote/) · [integrations](https://herdr.dev/docs/integrations/) · [plugins](https://herdr.dev/docs/plugins/) · [socket api](https://herdr.dev/docs/socket-api/)
 
-## sponsors
+## thanks
 
-herdr is built full-time, in the open. sponsoring directly funds development, stability, and the path to a real agent runtime.
+every past sponsor and backer is listed in [SPONSORS.md](./SPONSORS.md) — thank you 🐑
 
-### gold
-
-<a href="https://terminaltrove.com/"><img src="assets/sponsors/terminal-trove.png" alt="Terminal Trove" width="200" /></a>
-
-[**→ become a sponsor**](https://github.com/sponsors/ogulcancelik) · enterprise / partnership: hey@herdr.dev · see [SPONSORS.md](./SPONSORS.md) for tiers. thank you 🐑
+enterprise / partnership: hey@herdr.dev
 
 ## agent instructions
 
@@ -75,7 +72,7 @@ if you are an ai agent helping with this repository, read [`AGENTS.md`](./AGENTS
 ## development
 
 ```bash
-git clone https://github.com/AoManoh/herdr
+git clone https://github.com/herdrdev/herdr
 cd herdr
 cargo build --release
 

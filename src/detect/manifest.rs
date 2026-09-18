@@ -1,6 +1,6 @@
 use std::{
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock, RwLock},
+    sync::{Arc, Mutex, OnceLock, RwLock},
 };
 
 use regex::Regex;
@@ -123,7 +123,8 @@ pub struct RuleEvidence {
 #[derive(Debug, Clone)]
 struct LoadedManifest {
     manifest: AgentManifest,
-    compiled_rules: Vec<CompiledRule>,
+    // Keep Regex search caches warm across manifest loads and pane polling.
+    compiled_rules: Arc<[CompiledRule]>,
     source: ManifestSource,
     warning: Option<String>,
     cached_remote_version: Option<String>,
@@ -251,10 +252,13 @@ const BUNDLED_MANIFESTS: &[(&str, &str)] = &[
     ("kilo", include_str!("manifests/kilo.toml")),
     ("kimi", include_str!("manifests/kimi.toml")),
     ("kiro", include_str!("manifests/kiro.toml")),
+    ("letta", include_str!("manifests/letta.toml")),
     ("maki", include_str!("manifests/maki.toml")),
+    ("muse", include_str!("manifests/muse.toml")),
     ("opencode", include_str!("manifests/opencode.toml")),
     ("pi", include_str!("manifests/pi.toml")),
     ("qodercli", include_str!("manifests/qodercli.toml")),
+    ("qwen", include_str!("manifests/qwen.toml")),
     ("copilot", include_str!("manifests/github-copilot.toml")),
 ];
 
@@ -281,6 +285,36 @@ pub(crate) fn reload_manifests() -> Vec<AgentManifestSummary> {
         Err(poisoned) => *poisoned.into_inner() = cache,
     }
     summaries
+}
+
+pub(crate) fn reload_manifests_for_agents(agents: &[Agent]) {
+    if agents.is_empty() {
+        return;
+    }
+
+    let _reload_guard = MANIFEST_RELOAD_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let lock = manifest_cache();
+    let replacements = Agent::SCREEN_MANIFEST_AGENTS
+        .into_iter()
+        .filter(|agent| agents.contains(agent))
+        .map(|agent| (agent, load_manifest_uncached(agent)))
+        .collect::<Vec<_>>();
+    let mut cache = match lock.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    for (agent, replacement) in replacements {
+        if let Some((_, loaded)) = cache
+            .manifests
+            .iter_mut()
+            .find(|(cached_agent, _)| *cached_agent == agent)
+        {
+            *loaded = replacement;
+        }
+    }
 }
 
 fn manifest_cache() -> &'static RwLock<ManifestCache> {
@@ -420,7 +454,12 @@ fn evaluate_loaded_manifest(
     let mut matched: Option<(&ManifestRule, String)> = None;
     let mut evaluated_rules = Vec::new();
 
-    for (rule, compiled_rule) in loaded.manifest.rules.iter().zip(&loaded.compiled_rules) {
+    for (rule, compiled_rule) in loaded
+        .manifest
+        .rules
+        .iter()
+        .zip(loaded.compiled_rules.iter())
+    {
         let region_text = region(input, &rule.region);
         let matched_rule = compiled_rule_matches(compiled_rule, region_text);
         evaluated_rules.push(EvaluatedRule {
@@ -670,7 +709,7 @@ fn loaded_manifest(
     cached_remote_version: Option<String>,
     local_override_shadowing_remote: bool,
 ) -> Result<LoadedManifest, String> {
-    let compiled_rules = compile_manifest(&manifest)?;
+    let compiled_rules = compile_manifest(&manifest)?.into();
     Ok(LoadedManifest {
         manifest,
         compiled_rules,

@@ -5,7 +5,10 @@ mod keybinds;
 mod model;
 mod sidebar;
 mod sound;
+mod tab_bar;
 mod theme;
+mod window_title;
+mod write;
 
 pub use self::{
     io::{
@@ -20,26 +23,61 @@ pub use self::{
     },
     model::{
         validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,
-        ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig, ShellModeConfig,
-        SidebarCollapsedModeConfig, TabBarPositionConfig, ToastClipboardPosition, ToastConfig,
-        ToastDelivery, ToastHerdrPosition, UiLanguage, UpdateChannelConfig,
-        MAX_TOAST_DELAY_SECONDS,
+        ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig, PaneBordersConfig,
+        ShellModeConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle, TabBarPositionConfig,
+        ToastClipboardPosition, ToastConfig, ToastDelivery, ToastHerdrPosition, UiLanguage,
+        UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,
         SpaceSidebarToken, SpacesSidebarConfig,
     },
     sound::SoundConfig,
-    theme::{parse_color, CustomThemeColors, ThemeConfig},
+    tab_bar::TabBarRightEntryConfig,
+    theme::{parse_color, CustomThemeColors, ModeThemeColors, ThemeConfig, THEME_NAMES},
+    window_title::{WindowTitlePart, WindowTitleTemplate, WindowTitleToken},
 };
 
-pub(crate) use self::io::upsert_top_level_bool;
 pub(crate) use self::keybinds::parse_key_combo;
+pub(crate) use self::write::{update_file_at, write_edit, ConfigEdit};
+pub(crate) use self::{
+    io::upsert_top_level_bool,
+    tab_bar::{
+        parse_tab_bar_datetime_format, tab_bar_right_diagnostics,
+        MAX_TAB_BAR_COMMAND_INTERVAL_SECONDS, MAX_TAB_BAR_COMMAND_TIMEOUT_SECONDS,
+        MAX_TAB_BAR_RIGHT_ENTRIES,
+    },
+    theme::canonical_theme_name,
+    window_title::{sanitize_window_title_text, window_title_diagnostics},
+};
+
+pub(crate) use self::{keybinds::CommandKeybindType, model::KeysConfig};
 
 pub const CONFIG_PATH_ENV_VAR: &str = "HERDR_CONFIG_PATH";
+
+pub(crate) fn is_keybinding_config_diagnostic(diagnostic: &str) -> bool {
+    if diagnostic.starts_with("config parse error:") || diagnostic.starts_with("config read error:")
+    {
+        return false;
+    }
+    diagnostic.contains("keybinding") || diagnostic.contains("keys.")
+}
+
+pub(crate) fn config_diagnostic_summary_without_keybindings(
+    diagnostics: &[String],
+) -> Option<String> {
+    let diagnostics = diagnostics
+        .iter()
+        .filter(|diagnostic| !is_keybinding_config_diagnostic(diagnostic))
+        .cloned()
+        .collect::<Vec<_>>();
+    config_diagnostic_summary(&diagnostics)
+}
 pub const DEFAULT_SCROLLBACK_LIMIT_BYTES: usize = 10_000_000;
 pub const DEFAULT_MOUSE_SCROLL_LINES: usize = 3;
 pub const DEFAULT_MOBILE_WIDTH_THRESHOLD: u16 = 64;
+pub const DEFAULT_HEADLESS_COLS: u16 = 120;
+pub const DEFAULT_HEADLESS_ROWS: u16 = 40;
 
 #[cfg(test)]
 pub(crate) fn app_dir_name() -> &'static str {
@@ -57,6 +95,13 @@ impl Config {
         self.onboarding.unwrap_or(true)
     }
 
+    pub fn kitty_graphics_enabled(&self) -> bool {
+        self.terminal
+            .kitty_graphics
+            .or(self.experimental.kitty_graphics)
+            .unwrap_or(true)
+    }
+
     pub fn prefix_key(&self) -> (KeyCode, KeyModifiers) {
         self.validated_keybinds().1
     }
@@ -72,9 +117,30 @@ impl Config {
             .into_iter()
             .chain(keybind_diags)
             .chain(self.remote_image_paste_key().err())
+            .chain(self.theme.diagnostics())
             .chain(self.ui.sound.diagnostics())
+            .chain(tab_bar_right_diagnostics(&self.ui.tab_bar_right))
+            .chain(window_title_diagnostics(&self.ui.window_title))
             .chain(self.invalid_sidebar_bounds_diagnostic())
+            .chain(self.invalid_headless_size_diagnostic())
             .collect()
+    }
+
+    pub(crate) fn headless_size(&self) -> (u16, u16) {
+        if self.invalid_headless_size_diagnostic().is_some() {
+            (DEFAULT_HEADLESS_COLS, DEFAULT_HEADLESS_ROWS)
+        } else {
+            (self.server.headless_cols, self.server.headless_rows)
+        }
+    }
+
+    pub(crate) fn invalid_headless_size_diagnostic(&self) -> Option<String> {
+        (self.server.headless_cols == 0 || self.server.headless_rows == 0).then(|| {
+            format!(
+                "server.headless_cols and server.headless_rows must be greater than zero (got {}x{})",
+                self.server.headless_cols, self.server.headless_rows
+            )
+        })
     }
 
     pub(crate) fn invalid_sidebar_bounds_diagnostic(&self) -> Option<String> {
@@ -98,12 +164,6 @@ impl Config {
         })
     }
 
-    #[cfg(test)]
-    pub fn live_keybinds(&self) -> Result<LiveKeybindConfig, Vec<String>> {
-        self.live_keybinds_with_diagnostics()
-            .map(|(live, _diagnostics)| live)
-    }
-
     pub(crate) fn live_keybinds_with_diagnostics(
         &self,
     ) -> Result<(LiveKeybindConfig, Vec<String>), Vec<String>> {
@@ -121,10 +181,19 @@ impl Config {
             keys: model::KeysConfigOverlay,
         }
 
-        toml::to_string_pretty(&KeysProfile {
-            keys: self.keys.local_profile(&self.keybinds()),
-        })
+        let mut keys = self.keys.local_profile(&self.keybinds());
+        keys.set_prefix(format_key_combo(self.prefix_key()));
+        toml::to_string_pretty(&KeysProfile { keys })
     }
+}
+
+pub(crate) fn keybindings_from_profile_toml(profile: &str) -> Result<LiveKeybindConfig, String> {
+    let config = toml::from_str::<Config>(profile)
+        .map_err(|err| format!("invalid keybinding profile: {err}"))?;
+    config
+        .live_keybinds_with_diagnostics()
+        .map(|(keybinds, _diagnostics)| keybinds)
+        .map_err(|diagnostics| diagnostics.join("; "))
 }
 
 #[cfg(test)]
@@ -154,6 +223,23 @@ command = "lazygit"
         assert!(!profile.contains("lazygit"));
         assert!(!profile.contains("command ="));
         assert!(!profile.contains("[[keys.command]]"));
+    }
+
+    #[test]
+    fn local_keybindings_profile_publishes_the_effective_prefix_fallback() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+prefix = "ctrl+"
+"#,
+        )
+        .unwrap();
+
+        let profile = config.local_keybindings_profile_toml().unwrap();
+        let keybinds = keybindings_from_profile_toml(&profile).unwrap();
+
+        assert!(profile.contains("prefix = \"ctrl+b\""));
+        assert_eq!(keybinds.prefix, config.prefix_key());
     }
 
     #[test]

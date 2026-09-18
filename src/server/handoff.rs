@@ -22,8 +22,11 @@ const HANDOFF_VERSION: u32 = 1;
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(unix)]
 const OWNED_ACK_TIMEOUT: Duration = Duration::from_millis(500);
+// Descriptors are transferred in batches of this size. A single SCM_RIGHTS
+// control message caps out at 253 descriptors on Linux and 254 on macOS, so the
+// batch stays well below both limits and the number of panes stays unbounded.
 #[cfg(unix)]
-pub(crate) const MAX_FDS_PER_HANDOFF: usize = 64;
+const FDS_PER_MESSAGE: usize = 64;
 #[cfg(unix)]
 pub(crate) const MAX_REPLAY_BYTES_PER_PANE: usize = 8 * 1024;
 #[cfg(unix)]
@@ -39,6 +42,11 @@ pub(crate) struct HandoffManifest {
     pub expected_protocol: Option<u32>,
     pub snapshot: crate::persist::SessionSnapshot,
     pub panes: Vec<crate::handoff_runtime::HandoffRuntimeState>,
+    /// An outer window title set over the API outlives the server that took the
+    /// call, so a handoff carries it rather than falling back to the config.
+    /// Absent from manifests written before this field existed.
+    #[serde(default)]
+    pub api_window_title: Option<String>,
 }
 
 #[cfg(unix)]
@@ -169,12 +177,6 @@ pub(crate) fn accept_and_validate_on(
 
 #[cfg(unix)]
 pub(crate) fn send_fds_and_wait_restored(stream: &mut UnixStream, fds: &[RawFd]) -> io::Result<()> {
-    if fds.len() > MAX_FDS_PER_HANDOFF {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("handoff supports at most {MAX_FDS_PER_HANDOFF} pane file descriptors at once"),
-        ));
-    }
     send_fds(stream, fds)?;
 
     stream.set_read_timeout(Some(READY_TIMEOUT))?;
@@ -304,6 +306,7 @@ pub(crate) fn manifest_for(
     panes: Vec<crate::handoff_runtime::HandoffRuntimeState>,
     expected_protocol: Option<u32>,
     expected_version: Option<String>,
+    api_window_title: Option<String>,
 ) -> HandoffManifest {
     HandoffManifest {
         version: HANDOFF_VERSION,
@@ -313,6 +316,7 @@ pub(crate) fn manifest_for(
         expected_protocol,
         snapshot,
         panes,
+        api_window_title,
     }
 }
 
@@ -375,6 +379,14 @@ fn read_line_unbuffered(stream: &mut UnixStream) -> io::Result<String> {
 
 #[cfg(unix)]
 fn send_fds(stream: &UnixStream, fds: &[RawFd]) -> io::Result<()> {
+    for batch in fds.chunks(FDS_PER_MESSAGE) {
+        send_fd_batch(stream, batch)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn send_fd_batch(stream: &UnixStream, fds: &[RawFd]) -> io::Result<()> {
     if fds.is_empty() {
         return Ok(());
     }
@@ -408,16 +420,47 @@ fn send_fds(stream: &UnixStream, fds: &[RawFd]) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn recv_fds(stream: &UnixStream, expected: usize) -> io::Result<Vec<RawFd>> {
-    if expected == 0 {
-        return Ok(Vec::new());
+fn close_raw_fds(fds: &[RawFd]) {
+    for fd in fds {
+        let _ = unsafe { libc::close(*fd) };
     }
+}
+
+#[cfg(unix)]
+fn recv_fds(stream: &UnixStream, expected: usize) -> io::Result<Vec<RawFd>> {
+    let mut out: Vec<RawFd> = Vec::with_capacity(expected);
+    while out.len() < expected {
+        let wanted = (expected - out.len()).min(FDS_PER_MESSAGE);
+        let batch = match recv_fd_batch(stream, wanted) {
+            Ok(batch) => batch,
+            Err(err) => {
+                close_raw_fds(&out);
+                return Err(err);
+            }
+        };
+        if batch.is_empty() {
+            let received = out.len();
+            close_raw_fds(&out);
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!(
+                    "handoff stream closed after {received} of {expected} pane file descriptors"
+                ),
+            ));
+        }
+        out.extend(batch);
+    }
+    Ok(out)
+}
+
+#[cfg(unix)]
+fn recv_fd_batch(stream: &UnixStream, wanted: usize) -> io::Result<Vec<RawFd>> {
     let mut byte = [0u8; 1];
     let mut iov = [libc::iovec {
         iov_base: byte.as_mut_ptr() as *mut libc::c_void,
         iov_len: byte.len(),
     }];
-    let fd_bytes = expected * std::mem::size_of::<RawFd>();
+    let fd_bytes = wanted * std::mem::size_of::<RawFd>();
     let mut control = vec![0u8; unsafe { libc::CMSG_SPACE(fd_bytes as u32) as usize }];
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
     msg.msg_iov = iov.as_mut_ptr();
@@ -429,33 +472,50 @@ fn recv_fds(stream: &UnixStream, expected: usize) -> io::Result<Vec<RawFd>> {
     if read < 0 {
         return Err(io::Error::last_os_error());
     }
-    if msg.msg_flags & libc::MSG_CTRUNC != 0 {
-        return Err(io::Error::other("handoff fd control message was truncated"));
-    }
 
     let mut out = Vec::new();
     unsafe {
-        let cmsg = libc::CMSG_FIRSTHDR(&msg);
-        if cmsg.is_null()
-            || (*cmsg).cmsg_level != libc::SOL_SOCKET
-            || (*cmsg).cmsg_type != libc::SCM_RIGHTS
-        {
-            return Err(io::Error::other("handoff fd message missing SCM_RIGHTS"));
-        }
-        let data_len = ((*cmsg).cmsg_len as usize).saturating_sub(libc::CMSG_LEN(0) as usize);
-        let count = data_len / std::mem::size_of::<RawFd>();
-        let data = libc::CMSG_DATA(cmsg) as *const RawFd;
-        for idx in 0..count {
-            out.push(*data.add(idx));
+        let control_end = control.as_ptr() as usize + msg.msg_controllen as usize;
+        let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
+        while !cmsg.is_null() {
+            if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS {
+                let data = libc::CMSG_DATA(cmsg);
+                // Bound the payload by both the header's own length and the
+                // bytes the kernel wrote into `control`, so the read below can
+                // never run past the buffer.
+                let available = control_end.saturating_sub(data as usize);
+                let data_len = ((*cmsg).cmsg_len as usize)
+                    .saturating_sub(libc::CMSG_LEN(0) as usize)
+                    .min(available);
+                let count = data_len / std::mem::size_of::<RawFd>();
+                let data = data as *const RawFd;
+                for idx in 0..count {
+                    out.push(*data.add(idx));
+                }
+            }
+            cmsg = libc::CMSG_NXTHDR(&msg, cmsg);
         }
     }
-    if out.len() != expected {
-        for fd in out {
-            let _ = unsafe { libc::close(fd) };
-        }
+
+    // Truncation means the kernel closed the descriptors that did not fit, so
+    // the batch is unrecoverable rather than merely short.
+    if msg.msg_flags & libc::MSG_CTRUNC != 0 {
+        close_raw_fds(&out);
+        return Err(io::Error::other("handoff fd control message was truncated"));
+    }
+    if read == 0 {
+        close_raw_fds(&out);
+        return Ok(Vec::new());
+    }
+    if out.len() > wanted {
+        let received = out.len();
+        close_raw_fds(&out);
         return Err(io::Error::other(format!(
-            "expected {expected} handoff fds, received fewer"
+            "handoff fd message carried {received} descriptors, expected at most {wanted}"
         )));
+    }
+    if out.is_empty() {
+        return Err(io::Error::other("handoff fd message missing SCM_RIGHTS"));
     }
     Ok(out)
 }
@@ -463,4 +523,55 @@ fn recv_fds(stream: &UnixStream, expected: usize) -> io::Result<Vec<RawFd>> {
 #[cfg(unix)]
 pub(crate) fn log_import_result(panes: usize) {
     info!(panes, "handoff import ready");
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    fn empty_snapshot() -> crate::persist::SessionSnapshot {
+        crate::persist::SessionSnapshot {
+            version: 0,
+            workspaces: Vec::new(),
+            active: None,
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_handoff_carries_an_api_set_window_title() {
+        let manifest = manifest_for(
+            empty_snapshot(),
+            Vec::new(),
+            None,
+            None,
+            Some("deploying".to_string()),
+        );
+
+        assert_eq!(manifest.api_window_title.as_deref(), Some("deploying"));
+    }
+
+    #[test]
+    fn a_manifest_written_before_the_title_field_still_loads() {
+        let manifest = manifest_for(
+            empty_snapshot(),
+            Vec::new(),
+            None,
+            None,
+            Some("deploying".to_string()),
+        );
+        let mut value = serde_json::to_value(&manifest).expect("manifest should serialize");
+        value
+            .as_object_mut()
+            .expect("manifest should be a json object")
+            .remove("api_window_title");
+
+        let older: HandoffManifest =
+            serde_json::from_value(value).expect("an older manifest should still load");
+
+        assert!(older.api_window_title.is_none());
+    }
 }

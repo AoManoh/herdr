@@ -16,15 +16,20 @@ pub(crate) const CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
 pub(crate) const KIMI_CODE_HOME_ENV_VAR: &str = "KIMI_CODE_HOME";
 pub(crate) const COPILOT_HOME_ENV_VAR: &str = "COPILOT_HOME";
 pub(crate) const QODERCLI_CONFIG_DIR_ENV_VAR: &str = "QODER_CONFIG_DIR";
+pub(crate) const QWEN_HOME_ENV_VAR: &str = "QWEN_HOME";
 pub(crate) const CURSOR_CONFIG_DIR_ENV_VAR: &str = "CURSOR_CONFIG_DIR";
 pub(crate) const ANTIGRAVITY_CLI_CONFIG_DIR_ENV_VAR: &str = "ANTIGRAVITY_CLI_CONFIG_DIR";
 pub(crate) const GROK_CONFIG_DIR_ENV_VAR: &str = "GROK_CONFIG_DIR";
 /// The grok CLI's own config-home override (documented alongside
 /// `$GROK_HOME/config.toml` and `$GROK_HOME/auth.json`).
 pub(crate) const GROK_HOME_ENV_VAR: &str = "GROK_HOME";
+pub(crate) const HERMES_HOME_ENV_VAR: &str = "HERMES_HOME";
 
 pub(crate) fn apply_pane_base_env(cmd: &mut CommandBuilder) {
     cmd.env(crate::api::SOCKET_PATH_ENV_VAR, crate::api::socket_path());
+    if let Ok(executable) = crate::platform::launch_executable() {
+        cmd.env("HERDR_BIN_PATH", executable);
+    }
 }
 
 pub(crate) fn pi_extension_dir() -> io::Result<PathBuf> {
@@ -69,6 +74,11 @@ pub(crate) fn copilot_dir() -> io::Result<PathBuf> {
 pub(crate) fn devin_dir() -> io::Result<PathBuf> {
     if let Some(value) = std::env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
         return expand_tilde_path(PathBuf::from(value)).map(|path| path.join("devin"));
+    }
+
+    #[cfg(windows)]
+    if let Some(value) = std::env::var_os("APPDATA").filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(value).join("devin"));
     }
 
     Ok(home_dir()?.join(".config").join("devin"))
@@ -117,11 +127,37 @@ pub(crate) fn opencode_dir() -> io::Result<PathBuf> {
     Ok(home_dir()?.join(".config/opencode"))
 }
 
+pub(crate) fn opencode_state_dir() -> io::Result<PathBuf> {
+    if let Some(value) = std::env::var_os("XDG_STATE_HOME").filter(|value| !value.is_empty()) {
+        return expand_tilde_path(PathBuf::from(value)).map(|path| path.join("opencode"));
+    }
+
+    Ok(home_dir()?.join(".local/state/opencode"))
+}
+
 pub(crate) fn kilo_dir() -> io::Result<PathBuf> {
     Ok(home_dir()?.join(".config/kilo"))
 }
 
 pub(crate) fn hermes_dir() -> io::Result<PathBuf> {
+    if let Some(value) = std::env::var_os(HERMES_HOME_ENV_VAR).filter(|value| !value.is_empty()) {
+        return expand_tilde_path(PathBuf::from(value));
+    }
+
+    #[cfg(windows)]
+    {
+        let explicit_home = std::env::var_os("HOME").filter(|value| !value.is_empty());
+        let profile = std::env::var_os("USERPROFILE").filter(|value| !value.is_empty());
+        if let Some(home) = explicit_home.filter(|home| profile.as_ref() != Some(home)) {
+            return Ok(PathBuf::from(home).join(".hermes"));
+        }
+        if let Some(local_app_data) =
+            std::env::var_os("LOCALAPPDATA").filter(|value| !value.is_empty())
+        {
+            return Ok(PathBuf::from(local_app_data).join("hermes"));
+        }
+    }
+
     Ok(home_dir()?.join(".hermes"))
 }
 
@@ -133,6 +169,14 @@ pub(crate) fn hermes_plugin_dir() -> io::Result<PathBuf> {
 
 pub(crate) fn qodercli_dir() -> io::Result<PathBuf> {
     config_dir_from_env_or_home(QODERCLI_CONFIG_DIR_ENV_VAR, &[".qoder"])
+}
+
+pub(crate) fn qwen_dir() -> io::Result<PathBuf> {
+    config_dir_from_env_or_home(QWEN_HOME_ENV_VAR, &[".qwen"])
+}
+
+pub(crate) fn letta_dir() -> io::Result<PathBuf> {
+    Ok(home_dir()?.join(".letta"))
 }
 
 pub(crate) fn cursor_dir() -> io::Result<PathBuf> {
@@ -188,7 +232,62 @@ pub(crate) fn home_dir() -> io::Result<PathBuf> {
 }
 
 #[cfg(test)]
-pub(crate) fn integration_env_lock() -> MutexGuard<'static, ()> {
+pub(crate) struct IntegrationEnvLock {
+    _guard: MutexGuard<'static, ()>,
+    #[cfg(windows)]
+    appdata: Option<std::ffi::OsString>,
+}
+
+#[cfg(test)]
+impl Drop for IntegrationEnvLock {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        if let Some(appdata) = self.appdata.take() {
+            std::env::set_var("APPDATA", appdata);
+        } else {
+            std::env::remove_var("APPDATA");
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn integration_env_lock() -> IntegrationEnvLock {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    let guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    IntegrationEnvLock {
+        _guard: guard,
+        #[cfg(windows)]
+        appdata: std::env::var_os("APPDATA"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opencode_state_dir_defaults_to_local_state() {
+        let _lock = integration_env_lock();
+        let original = std::env::var_os("XDG_STATE_HOME");
+        std::env::remove_var("XDG_STATE_HOME");
+        let expected = home_dir().unwrap().join(".local/state/opencode");
+        assert_eq!(opencode_state_dir().unwrap(), expected);
+        match original {
+            Some(value) => std::env::set_var("XDG_STATE_HOME", value),
+            None => std::env::remove_var("XDG_STATE_HOME"),
+        }
+    }
+
+    #[test]
+    fn opencode_state_dir_honors_xdg_state_home() {
+        let _lock = integration_env_lock();
+        let original = std::env::var_os("XDG_STATE_HOME");
+        let xdg = std::env::temp_dir().join("herdr-xdg-state");
+        std::env::set_var("XDG_STATE_HOME", &xdg);
+        assert_eq!(opencode_state_dir().unwrap(), xdg.join("opencode"));
+        match original {
+            Some(value) => std::env::set_var("XDG_STATE_HOME", value),
+            None => std::env::remove_var("XDG_STATE_HOME"),
+        }
+    }
 }

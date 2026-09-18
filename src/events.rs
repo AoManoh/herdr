@@ -37,6 +37,7 @@ pub struct ApiWorktreeRemoveRequest {
     pub id: String,
     pub operation_id: u64,
     pub checkout_key: std::path::PathBuf,
+    pub shutdown_panes: Vec<crate::layout::PaneId>,
     pub respond_to: std::sync::mpsc::Sender<String>,
 }
 
@@ -55,7 +56,18 @@ pub struct WorktreeRemoveResult {
 #[derive(Debug)]
 pub enum AppEvent {
     /// A pane's child process exited.
-    PaneDied { pane_id: PaneId },
+    PaneDied {
+        pane_id: PaneId,
+        exit_reason: crate::platform::ChildExitReason,
+    },
+    /// A worktree-removal runtime could not be restored normally.
+    WorktreeRuntimeRestoreFailed { pane_id: PaneId, operation_id: u64 },
+    /// Process detection identified an agent before its screen state was confirmed.
+    AgentProcessDetected {
+        pane_id: PaneId,
+        agent: Agent,
+        observed_at: Instant,
+    },
     /// Fallback detector state changed in a pane.
     StateChanged {
         pane_id: PaneId,
@@ -122,16 +134,15 @@ pub enum AppEvent {
     /// Remote agent detection manifest update check finished.
     AgentDetectionManifestsUpdated {
         updated: Vec<crate::detect::manifest_update::ManifestUpdateCommit>,
+        activated: Vec<crate::detect::Agent>,
         status: crate::detect::manifest_update::ManifestUpdateStatus,
     },
+    /// A pane child emitted one or more executable BEL characters.
+    /// The host-facing process forwards them to its outer terminal.
+    TerminalBell { pane_id: PaneId, count: u16 },
     /// A pane child emitted a valid OSC 52 clipboard write. The main loop
     /// re-emits it through herdr's own clipboard writer.
     ClipboardWrite { content: Vec<u8> },
-    /// Prefix-mode ASCII input-source request, emitted on entering/leaving the ASCII input
-    /// realm. The foreground process applies the host-local TIS switch (`active = true`) /
-    /// restore (`active = false`): the client in server mode (via server forwarding), the
-    /// app itself in monolithic mode.
-    PrefixInputSource { active: bool },
     /// A pane child reported its shell current directory through terminal
     /// metadata such as OSC 7.
     TerminalCwdReported {
@@ -142,6 +153,12 @@ pub enum AppEvent {
     GitStatusRefreshed {
         results: Vec<WorkspaceGitStatus>,
         cache_updates: Vec<(std::path::PathBuf, GitStatusCacheEntry)>,
+    },
+    /// A configured tab bar status command finished.
+    TabBarCommandFinished {
+        generation: u64,
+        segment_index: usize,
+        result: Result<Option<String>, String>,
     },
     /// A plugin action or event command finished.
     PluginCommandFinished {

@@ -1,6 +1,213 @@
 use super::harness::*;
 
 #[test]
+fn agent_explain_missing_file_reports_json_error() {
+    let base = unique_test_dir();
+    let missing = base.join("missing-screen.txt");
+    let output = run_named_cli(
+        &base.join("config"),
+        &base.join("runtime"),
+        &[
+            "agent",
+            "explain",
+            "--file",
+            missing.to_str().unwrap(),
+            "--agent",
+            "claude",
+            "--json",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["id"], "cli:agent:explain");
+    assert_eq!(error["error"]["code"], "agent_explain_file_read_failed");
+    assert!(error["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains(missing.to_str().unwrap()));
+}
+
+fn write_delayed_shell_and_fake_pi(
+    base: &Path,
+    shell_delay_seconds: &str,
+) -> (PathBuf, PathBuf, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin = base.join("bin");
+    let delayed_shell = bin.join("delayed-shell");
+    let fake_pi = bin.join("pi");
+    let invocations = base.join("pi-invocations");
+    fs::create_dir_all(&bin).unwrap();
+    fs::write(
+        &delayed_shell,
+        format!("#!/bin/sh\n/bin/sleep {shell_delay_seconds}\nexec /bin/sh\n"),
+    )
+    .unwrap();
+    fs::write(
+        &fake_pi,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\nexport HERDR_AGENT=pi\n'{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:delayed-shell-pi --agent pi --state idle >/dev/null\nwhile IFS= read -r _prompt; do :; done\n",
+            invocations.display(),
+            env!("CARGO_BIN_EXE_herdr"),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&delayed_shell, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions(&fake_pi, fs::Permissions::from_mode(0o755)).unwrap();
+    (bin, delayed_shell, invocations)
+}
+
+#[test]
+fn agent_start_waits_for_a_new_pane_shell_to_finish_initializing() {
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let socket_path = runtime_dir.join("herdr.sock");
+    let (bin, delayed_shell, invocations) = write_delayed_shell_and_fake_pi(&base, "0.4");
+    let config = format!(
+        "onboarding = false\n[terminal]\ndefault_shell = {:?}\nshell_mode = \"non_login\"\n",
+        delayed_shell.to_str().unwrap()
+    );
+    let herdr = spawn_herdr_with_config(
+        &config_home,
+        &runtime_dir,
+        &socket_path,
+        Some(&bin),
+        &config,
+    );
+    wait_for_socket(&socket_path, Duration::from_secs(5));
+    let seed = run_cli_json(
+        &socket_path,
+        &["workspace", "create", "--cwd", base.to_str().unwrap()],
+    );
+    let seed_workspace = seed["result"]["workspace"]["workspace_id"]
+        .as_str()
+        .unwrap();
+    let created = run_cli_json(
+        &socket_path,
+        &[
+            "workspace",
+            "create",
+            "--cwd",
+            base.to_str().unwrap(),
+            "--no-focus",
+        ],
+    );
+    let pane_id = created["result"]["root_pane"]["pane_id"].as_str().unwrap();
+    let terminal_id = created["result"]["root_pane"]["terminal_id"]
+        .as_str()
+        .unwrap();
+    assert!(!created["result"]["root_pane"]["focused"].as_bool().unwrap());
+
+    let started = run_cli_json(
+        &socket_path,
+        &[
+            "agent",
+            "start",
+            "worker",
+            "--kind",
+            "pi",
+            "--pane",
+            pane_id,
+            "--timeout",
+            "8000",
+            "--",
+            "--no-context-files",
+            "--no-skills",
+            "--no-extensions",
+        ],
+    );
+
+    assert_eq!(started["result"]["agent"]["terminal_id"], terminal_id);
+    assert_eq!(started["result"]["agent"]["pane_id"], pane_id);
+    assert_eq!(started["result"]["agent"]["interactive_ready"], true);
+    assert_eq!(
+        fs::read_to_string(&invocations).unwrap(),
+        "--no-context-files\n--no-skills\n--no-extensions\n"
+    );
+    assert_eq!(
+        run_cli_json(&socket_path, &["workspace", "list"])["result"]["workspaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|workspace| workspace["workspace_id"] == seed_workspace)
+            .unwrap()["focused"],
+        true
+    );
+
+    cleanup_spawned_herdr(herdr, base);
+}
+
+#[test]
+fn agent_start_stops_retrying_when_the_pane_shell_stays_busy() {
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let socket_path = runtime_dir.join("herdr.sock");
+    let (bin, delayed_shell, invocations) = write_delayed_shell_and_fake_pi(&base, "2.3");
+    let config = format!(
+        "onboarding = false\n[terminal]\ndefault_shell = {:?}\nshell_mode = \"non_login\"\n",
+        delayed_shell.to_str().unwrap()
+    );
+    let herdr = spawn_herdr_with_config(
+        &config_home,
+        &runtime_dir,
+        &socket_path,
+        Some(&bin),
+        &config,
+    );
+    wait_for_socket(&socket_path, Duration::from_secs(5));
+    let created = run_cli_json(
+        &socket_path,
+        &["workspace", "create", "--cwd", base.to_str().unwrap()],
+    );
+    let pane_id = created["result"]["root_pane"]["pane_id"].as_str().unwrap();
+
+    let started_at = Instant::now();
+    let unavailable = run_cli(
+        &socket_path,
+        &[
+            "agent",
+            "start",
+            "worker",
+            "--kind",
+            "pi",
+            "--pane",
+            pane_id,
+            "--timeout",
+            "8000",
+        ],
+    );
+    assert_eq!(unavailable.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&unavailable.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "agent_pane_busy");
+    assert!(started_at.elapsed() >= Duration::from_secs(2));
+    assert!(started_at.elapsed() < Duration::from_secs(4));
+    assert!(!invocations.exists());
+
+    let retried = run_cli_json(
+        &socket_path,
+        &[
+            "agent",
+            "start",
+            "worker",
+            "--kind",
+            "pi",
+            "--pane",
+            pane_id,
+            "--timeout",
+            "8000",
+        ],
+    );
+    assert_eq!(retried["result"]["type"], "agent_started");
+    assert_eq!(fs::read_to_string(&invocations).unwrap(), "\n");
+
+    cleanup_spawned_herdr(herdr, base);
+}
+
+#[test]
 fn agent_start_command_works() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -16,10 +223,8 @@ fn agent_start_command_works() {
     fs::write(
         &fake_pi,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexport HERDR_AGENT=pi\n'{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\nwhile IFS= read -r prompt; do\n  case \"$prompt\" in \"do not transition\"|\"stall\") continue ;; esac\n  '{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state working >/dev/null\n  '{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\n  printf '%s\\n' \"$prompt\" >> '{}'\ndone\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}'\nexport HERDR_AGENT=pi\n'{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\nwhile IFS= read -r prompt; do\n  case \"$prompt\" in\n    \"do not transition\") continue ;;\n    \"done churn\")\n      '{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state done >/dev/null\n      '{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\n      continue\n      ;;\n    \"session churn\")\n      '{1}' pane report-agent-session \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --agent-session-id replacement >/dev/null\n      continue\n      ;;\n    \"block after submit\")\n      '{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state blocked >/dev/null\n      continue\n      ;;\n  esac\n  '{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state working >/dev/null\n  '{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\n  printf '%s\\n' \"$prompt\" >> '{2}'\ndone\n",
             captured_args.display(),
-            env!("CARGO_BIN_EXE_herdr"),
-            env!("CARGO_BIN_EXE_herdr"),
             env!("CARGO_BIN_EXE_herdr"),
             captured_prompts.display(),
         ),
@@ -75,7 +280,7 @@ fn agent_start_command_works() {
         assert_eq!(error["error"]["code"], "invalid_agent_argument");
     }
 
-    for invalid_timeout in ["3000", "300001"] {
+    for invalid_timeout in ["3000", "300001", "18446744073709551615"] {
         let rejected = run_cli(
             &socket_path,
             &[
@@ -148,53 +353,113 @@ fn agent_start_command_works() {
     let after = run_cli_json(&socket_path, &["pane", "list"]);
     assert_eq!(pane_topology_snapshot(&after), before_topology);
 
-    let stale_idle = run_cli(
+    let prompts_before_blocked = fs::read(&captured_prompts).unwrap();
+    let blocked_report = run_cli(
         &socket_path,
         &[
-            "agent",
-            "prompt",
-            "main",
-            "do not transition",
-            "--wait",
-            "--timeout",
-            "500",
+            "pane",
+            "report-agent",
+            &pane_id,
+            "--source",
+            "custom:fake-pi",
+            "--agent",
+            "pi",
+            "--state",
+            "blocked",
         ],
     );
-    assert_eq!(stale_idle.status.code(), Some(1));
-    let stale_idle: serde_json::Value = serde_json::from_slice(&stale_idle.stderr).unwrap();
-    assert_eq!(stale_idle["error"]["code"], "timeout");
-
-    let stalled = run_cli(
-        &socket_path,
-        &[
-            "agent",
-            "prompt",
-            "main",
-            "stall",
-            "--wait",
-            "--timeout",
-            "6000",
-        ],
+    assert!(blocked_report.status.success());
+    assert_eq!(
+        run_cli_json(&socket_path, &["agent", "get", "main"])["result"]["agent"]["agent_status"],
+        "blocked"
     );
-    assert_eq!(stalled.status.code(), Some(1));
-    let stalled: serde_json::Value = serde_json::from_slice(&stalled.stderr).unwrap();
-    assert_eq!(stalled["error"]["code"], "agent_prompt_stalled");
-    assert!(stalled["error"]["message"]
-        .as_str()
-        .is_some_and(|message| message.contains("state_change_seq remained")));
 
-    let prompted = run_cli(
+    let blocked_prompt = run_cli(
         &socket_path,
         &[
             "agent",
             "prompt",
             "main",
-            "Review this diff",
+            "must not be submitted",
             "--wait",
             "--timeout",
             "2000",
         ],
     );
+    assert_eq!(blocked_prompt.status.code(), Some(1));
+    let blocked_prompt: serde_json::Value = serde_json::from_slice(&blocked_prompt.stderr).unwrap();
+    assert_eq!(blocked_prompt["error"]["code"], "agent_blocked");
+    thread::sleep(Duration::from_millis(400));
+    assert_eq!(fs::read(&captured_prompts).unwrap(), prompts_before_blocked);
+
+    let report_agent = |state| {
+        run_cli(
+            &socket_path,
+            &[
+                "pane",
+                "report-agent",
+                &pane_id,
+                "--source",
+                "custom:fake-pi",
+                "--agent",
+                "pi",
+                "--state",
+                state,
+            ],
+        )
+        .status
+        .success()
+    };
+    let prompt_wait = |prompt, timeout| {
+        run_cli(
+            &socket_path,
+            &[
+                "agent",
+                "prompt",
+                "main",
+                prompt,
+                "--wait",
+                "--timeout",
+                timeout,
+            ],
+        )
+    };
+
+    assert!(report_agent("idle"));
+    let stale_idle = prompt_wait("do not transition", "500");
+    assert_eq!(stale_idle.status.code(), Some(1));
+    let stale_idle: serde_json::Value = serde_json::from_slice(&stale_idle.stderr).unwrap();
+    assert_eq!(stale_idle["error"]["code"], "timeout");
+
+    let stalled = prompt_wait("do not transition", "6000");
+    assert_eq!(stalled.status.code(), Some(1));
+    let stalled: serde_json::Value = serde_json::from_slice(&stalled.stderr).unwrap();
+    assert_eq!(stalled["error"]["code"], "agent_prompt_stalled");
+    assert!(stalled["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("no observed working or blocked state")));
+
+    for prompt in ["done churn", "session churn"] {
+        let settled_only = prompt_wait(prompt, "500");
+        assert_eq!(settled_only.status.code(), Some(1));
+        let settled_only: serde_json::Value = serde_json::from_slice(&settled_only.stderr).unwrap();
+        assert_eq!(settled_only["error"]["code"], "timeout");
+    }
+
+    let blocked_after_submit = prompt_wait("block after submit", "2000");
+    assert!(blocked_after_submit.status.success());
+    let blocked_after_submit: serde_json::Value =
+        serde_json::from_slice(&blocked_after_submit.stdout).unwrap();
+    assert_eq!(
+        blocked_after_submit["result"]["agent"]["agent_status"],
+        "blocked"
+    );
+    assert!(report_agent("idle"));
+    assert!(report_agent("working"));
+    let already_working = prompt_wait("finish active", "2000");
+    assert!(already_working.status.success());
+
+    let prompted = prompt_wait("Review this diff", "2000");
     assert!(
         prompted.status.success(),
         "prompt failed: {}",
@@ -259,7 +524,7 @@ fn agent_start_rejects_a_shell_replaced_by_a_foreground_program() {
             "--pane",
             &pane_id,
             "--timeout",
-            "1000",
+            "4000",
         ],
     );
     assert_eq!(started.status.code(), Some(1));
@@ -310,6 +575,23 @@ fn agent_start_timeout_releases_the_name_for_reuse() {
         .unwrap()
         .to_string();
 
+    assert!(run_cli(
+        &socket_path,
+        &[
+            "pane",
+            "report-agent",
+            &reuse_pane_id,
+            "--source",
+            "custom:reuse",
+            "--agent",
+            "pi",
+            "--state",
+            "idle",
+        ],
+    )
+    .status
+    .success());
+
     let started = run_cli(
         &socket_path,
         &[
@@ -328,22 +610,6 @@ fn agent_start_timeout_releases_the_name_for_reuse() {
     let error: serde_json::Value = serde_json::from_slice(&started.stderr).unwrap();
     assert_eq!(error["error"]["code"], "timeout");
 
-    assert!(run_cli(
-        &socket_path,
-        &[
-            "pane",
-            "report-agent",
-            &reuse_pane_id,
-            "--source",
-            "custom:reuse",
-            "--agent",
-            "pi",
-            "--state",
-            "idle",
-        ],
-    )
-    .status
-    .success());
     let reused = run_cli(&socket_path, &["agent", "rename", &reuse_pane_id, "worker"]);
     assert!(
         reused.status.success(),

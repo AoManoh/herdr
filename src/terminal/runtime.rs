@@ -245,11 +245,6 @@ impl TerminalRuntime {
         self.0.agent_detection_reset_notify_for_test()
     }
 
-    #[cfg(test)]
-    pub(crate) fn agent_detection_enabled_for_test(&self) -> bool {
-        self.0.agent_detection_enabled_for_test()
-    }
-
     pub fn set_full_lifecycle_authority_active(&self, active: bool) {
         self.0.set_full_lifecycle_authority_active(active);
     }
@@ -283,23 +278,20 @@ impl TerminalRuntime {
         self.0.scroll_metrics()
     }
 
-    pub(crate) fn search_text_matches(
+    pub(crate) fn search_text_window(
         &self,
         query: &str,
         case_sensitive: bool,
-    ) -> Vec<crate::pane::TerminalTextMatch> {
-        self.0.search_text_matches(query, case_sensitive)
-    }
-
-    pub(crate) fn text_match_is_current(&self, text_match: crate::pane::TerminalTextMatch) -> bool {
-        self.0.text_match_is_current(text_match)
-    }
-
-    pub(crate) fn text_matches_are_current(
-        &self,
-        text_matches: &[crate::pane::TerminalTextMatch],
-    ) -> Vec<bool> {
-        self.0.text_matches_are_current(text_matches)
+        direction: crate::pane::TerminalSearchDirection,
+        cursor: crate::pane::TerminalTextPoint,
+        previous: Option<(
+            crate::pane::TerminalTextPoint,
+            crate::pane::TerminalTextPoint,
+        )>,
+        limit: usize,
+    ) -> crate::pane::TerminalSearchWindow {
+        self.0
+            .search_text_window(query, case_sensitive, direction, cursor, previous, limit)
     }
 
     pub(crate) fn word_motion_target(
@@ -311,8 +303,37 @@ impl TerminalRuntime {
         self.0.word_motion_target(row, col, motion)
     }
 
-    pub fn input_state(&self) -> Option<crate::pane::InputState> {
-        self.0.input_state()
+    pub(crate) fn terminal_dimensions(&self) -> Option<(u16, u16)> {
+        self.0.terminal_dimensions()
+    }
+
+    pub(crate) fn paragraph_motion_target(
+        &self,
+        row: u32,
+        direction: i8,
+    ) -> Option<crate::pane::TerminalTextPoint> {
+        self.0.paragraph_motion_target(row, direction)
+    }
+
+    pub fn bracketed_paste_enabled(&self) -> bool {
+        self.0.bracketed_paste_enabled()
+    }
+
+    pub fn mouse_reporting_enabled(&self) -> bool {
+        self.0.mouse_reporting_enabled()
+    }
+
+    pub fn sgr_pixel_mouse_enabled(&self) -> bool {
+        self.0.sgr_pixel_mouse_enabled()
+    }
+
+    pub fn plain_page_keys_use_host_scrollback(&self) -> Option<bool> {
+        self.0.plain_page_keys_use_host_scrollback()
+    }
+
+    /// Reads only whether the alternate screen is active.
+    pub fn alternate_screen_active(&self) -> bool {
+        self.0.alternate_screen_active()
     }
 
     pub fn cursor_state(
@@ -349,10 +370,6 @@ impl TerminalRuntime {
 
     pub fn agent_osc_progress(&self) -> String {
         self.0.agent_osc_progress()
-    }
-
-    pub fn recent_text(&self, lines: usize) -> String {
-        self.0.recent_text(lines)
     }
 
     pub(crate) fn recent_text_snapshot(&self, lines: usize) -> crate::pane::TerminalReadSnapshot {
@@ -394,16 +411,29 @@ impl TerminalRuntime {
         self.0.render(frame, area, show_cursor);
     }
 
-    pub(crate) fn collect_dirty_patch(
+    pub(crate) fn collect_dirty_patch_snapshot(
         &self,
         area_width: u16,
         area_height: u16,
-    ) -> crate::pane::TerminalDirtyPatchOutcome {
-        self.0.collect_dirty_patch(area_width, area_height)
+    ) -> Option<crate::pane::TerminalDirtyPatchSnapshot> {
+        self.0.collect_dirty_patch_snapshot(area_width, area_height)
     }
 
     pub fn visible_hyperlinks(&self, area: Rect) -> Vec<((u16, u16), String, String)> {
         self.0.visible_hyperlinks(area)
+    }
+
+    pub(crate) fn link_regions_at(
+        &self,
+        col: u16,
+        row: u16,
+        resolve: fn(&str, usize) -> Option<std::ops::Range<usize>>,
+    ) -> Vec<crate::api::schema::PaneLinkRegion> {
+        self.0.link_regions_at(col, row, resolve)
+    }
+
+    pub(crate) fn link_target_at(&self, col: u16, row: u16) -> Option<crate::ghostty::LinkTarget> {
+        self.0.link_target_at(col, row)
     }
 
     pub fn kitty_image_placements_with_data_filter<F>(
@@ -420,24 +450,27 @@ impl TerminalRuntime {
         self.0.keyboard_protocol()
     }
 
-    pub fn encode_terminal_key(&self, key: crate::input::TerminalKey) -> Vec<u8> {
-        self.0.encode_terminal_key(key)
+    pub fn modify_other_keys_level(&self) -> u8 {
+        self.0.modify_other_keys_level()
     }
 
-    pub async fn send_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::SendError<Bytes>> {
-        self.0.send_bytes(bytes).await
+    pub fn encode_terminal_key(&self, key: crate::input::TerminalKey) -> Vec<u8> {
+        self.0.encode_terminal_key(key)
     }
 
     pub fn try_send_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::TrySendError<Bytes>> {
         self.0.try_send_bytes(bytes)
     }
 
-    pub fn send_bytes_after(&self, bytes: Bytes, delay: std::time::Duration) {
-        self.0.send_bytes_after(bytes, delay);
-    }
-
-    pub async fn send_paste(&self, text: String) -> Result<(), mpsc::error::SendError<Bytes>> {
-        self.0.send_paste(text).await
+    pub fn queue_user_input_submission(
+        &self,
+        text: Bytes,
+        enter: Bytes,
+        delay: std::time::Duration,
+        deadline: Option<std::time::Instant>,
+    ) -> std::io::Result<std::sync::mpsc::Receiver<std::io::Result<()>>> {
+        self.0
+            .queue_user_input_submission(text, enter, delay, deadline)
     }
 
     pub fn try_send_paste(&self, text: String) -> Result<(), mpsc::error::TrySendError<Bytes>> {
@@ -462,34 +495,56 @@ impl TerminalRuntime {
         Some((screen, crate::terminal::ScreenSnapshot { cols, rows }))
     }
 
+    pub(crate) fn screen_text_snapshot_with_seq(
+        &self,
+    ) -> Option<(
+        crate::ghostty::ActiveScreen,
+        crate::terminal::ScreenSnapshot,
+        u64,
+    )> {
+        for _ in 0..3 {
+            let before = self.content_seq();
+            if !before.is_multiple_of(2) {
+                continue;
+            }
+            let (screen, snapshot) = self.screen_text_snapshot()?;
+            let after = self.content_seq();
+            if before == after {
+                return Some((screen, snapshot, after));
+            }
+        }
+        None
+    }
+
     pub fn encode_mouse_button(
         &self,
         kind: crossterm::event::MouseEventKind,
-        column: u16,
-        row: u16,
+        position: crate::input::mouse::Position,
         modifiers: crossterm::event::KeyModifiers,
     ) -> Option<Vec<u8>> {
-        self.0.encode_mouse_button(kind, column, row, modifiers)
+        self.0.encode_mouse_button(kind, position, modifiers)
     }
 
-    pub fn encode_mouse_motion(
+    pub(crate) fn encode_mouse_motion(
         &self,
         kind: crossterm::event::MouseEventKind,
-        column: u16,
-        row: u16,
+        position: crate::input::mouse::Position,
         modifiers: crossterm::event::KeyModifiers,
     ) -> Option<Vec<u8>> {
-        self.0.encode_mouse_motion(kind, column, row, modifiers)
+        self.0.encode_mouse_motion(kind, position, modifiers)
     }
 
-    pub fn encode_mouse_wheel(
+    pub(crate) fn encode_mouse_wheel(
         &self,
         kind: crossterm::event::MouseEventKind,
-        column: u16,
-        row: u16,
+        position: crate::input::mouse::Position,
         modifiers: crossterm::event::KeyModifiers,
     ) -> Option<Vec<u8>> {
-        self.0.encode_mouse_wheel(kind, column, row, modifiers)
+        self.0.encode_mouse_wheel(kind, position, modifiers)
+    }
+
+    pub(crate) fn pixel_size(&self) -> Option<(u32, u32)> {
+        self.0.pixel_size()
     }
 
     pub fn encode_alternate_scroll(
@@ -518,10 +573,21 @@ impl TerminalRuntime {
     pub(crate) fn current_size(&self) -> (u16, u16) {
         self.0.current_size()
     }
+
+    pub(crate) fn content_seq(&self) -> u64 {
+        self.0.content_seq()
+    }
 }
 
 #[cfg(test)]
 impl TerminalRuntime {
+    pub(crate) fn test_contend_during_dirty_collection(
+        &self,
+        bytes: Vec<u8>,
+    ) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<bool>) {
+        self.0.test_contend_during_dirty_collection(bytes)
+    }
+
     pub(crate) fn test_with_channel(cols: u16, rows: u16) -> (Self, mpsc::Receiver<Bytes>) {
         let (runtime, rx) = crate::pane::PaneRuntime::test_with_channel(cols, rows);
         (Self(runtime), rx)
