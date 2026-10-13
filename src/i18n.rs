@@ -104,7 +104,16 @@ pub(crate) fn text(language: UiLanguage, english: &'static str) -> &'static str 
         }
         " removing…" => " 正在移除…",
         " opening…" => " 正在打开…",
-        " search panes" => " 搜索窗格",
+        "search agents and terminals" => "搜索智能体和终端",
+        "Go to" => "跳转到",
+        " No matching agents or terminals" => " 没有匹配的智能体或终端",
+        "auth" => "需认证",
+        "error" => "错误",
+        "Close workspace?" => "关闭工作区？",
+        "Close worktree group?" => "关闭工作树分组？",
+        "Close target changed; try closing the tab again" => "关闭目标已变化，请重新关闭该标签页",
+        "workspaces" => "工作区",
+        "terminals" => "终端",
         "blocked" => "等待输入",
         "working" => "工作中",
         "idle" => "空闲",
@@ -149,8 +158,8 @@ pub(crate) fn text(language: UiLanguage, english: &'static str) -> &'static str 
         "search type · move ↑↓/ctrl+n/p · open enter · back esc" => {
             "搜索输入 · ↑↓/ctrl+n/p 移动 · 回车打开 · esc 返回"
         }
-        "move j/k · expand space · filter a/b/w/i/d · search / · open enter · close esc" => {
-            "j/k 移动 · 空格展开 · a/b/w/i/d 筛选 · / 搜索 · 回车打开 · esc 关闭"
+        " ↑↓/j/k rows · ←→ workspace · / search · a/b/w/i/d filter · enter open · esc close" => {
+            " ↑↓/j/k 选择 · ←→ 切换工作区 · / 搜索 · a/b/w/i/d 筛选 · 回车打开 · esc 关闭"
         }
         "edit ←→/home/end · kill ^u/^k · yank ^y · scroll ↑↓ · back esc" => {
             "←→/home/end 编辑 · ^u/^k 删除 · ^y 粘贴 · ↑↓ 滚动 · esc 返回"
@@ -293,6 +302,7 @@ pub(crate) fn keybind_label(language: UiLanguage, label: &str) -> Cow<'_, str> {
         "split vertical" => "纵向拆分",
         "split horizontal" => "横向拆分",
         "close pane" => "关闭窗格",
+        "clear pane" => "清空窗格",
         "rename pane" => "重命名窗格",
         "edit scrollback" => "编辑回滚内容",
         "copy mode" => "复制模式",
@@ -608,5 +618,28 @@ mod tests {
             plugin_installed_from(UiLanguage::ZhCn, "example.plugin", "owner/repo"),
             "已从 owner/repo 安装 example.plugin。"
         );
+    }
+
+    #[test]
+    fn resolves_v0_9_3_shell_messages() {
+        assert_eq!(text(UiLanguage::En, "Close workspace?"), "Close workspace?");
+        assert_eq!(text(UiLanguage::ZhCn, "Close workspace?"), "关闭工作区？");
+        assert_eq!(text(UiLanguage::ZhCn, "Go to"), "跳转到");
+        assert_eq!(
+            text(
+                UiLanguage::ZhCn,
+                " ↑↓/j/k rows · ←→ workspace · / search · a/b/w/i/d filter · enter open · esc close"
+            ),
+            " ↑↓/j/k 选择 · ←→ 切换工作区 · / 搜索 · a/b/w/i/d 筛选 · 回车打开 · esc 关闭"
+        );
+        assert_eq!(
+            count(UiLanguage::En, 1, "terminal", "terminals"),
+            "1 terminal"
+        );
+        assert_eq!(
+            count(UiLanguage::ZhCn, 3, "terminal", "terminals"),
+            "3 终端"
+        );
+        assert_eq!(keybind_label(UiLanguage::ZhCn, "clear pane"), "清空窗格");
     }
 }

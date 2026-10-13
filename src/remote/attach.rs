@@ -86,43 +86,15 @@ pub(crate) fn run_remote(remote: RemoteLaunch) -> io::Result<()> {
     run_client_process(&local_socket, &reattach_command, remote.keybindings)
 }
 
-pub(crate) fn prepare_saved_ssh(
-    target: &str,
-    session_name: &str,
-) -> io::Result<Option<crate::client::endpoint::SshMachineMetadata>> {
+pub(crate) fn check_saved_ssh(target: &str, session: &str) -> io::Result<()> {
     super::validate_remote_target(target)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    crate::session::validate_name(session_name)
+    crate::session::validate_name(session)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let manage_ssh_config = crate::config::Config::load()
-        .config
-        .remote
-        .manage_ssh_config;
-    let ssh = RemoteSsh::new(
-        target.to_owned(),
-        manage_ssh_config,
-        session_name.to_owned(),
-    );
-    let prepared = prepare_remote_herdr(&ssh, false, true)?;
-    ensure_remote_server_ready(
-        &ssh,
-        &prepared.remote_herdr,
-        prepared.stop_after_install_approved,
-        false,
-        true,
-    )?;
-
-    // The bridge already owns daemon startup. EOF closes only this temporary attachment,
-    // leaving the named server running even when no local TUI is open yet.
-    let command = prepared
-        .remote_herdr
-        .executable
-        .saved_bridge_command(session_name);
-    let output = ssh.shell_output(&prepared.remote_herdr.platform, &command)?;
-    if !output.status.success() {
-        return Err(command_failed("remote server startup failed", &output));
-    }
-    match remote_server_status(&ssh, &prepared.remote_herdr, true)? {
+    let mut ssh = RemoteSsh::new_noninteractive(target.to_owned());
+    ssh.session_name = session.to_owned();
+    let remote = find_installed_remote_herdr(&ssh)?;
+    match remote_server_status(&ssh, &remote, false)? {
         RemoteServerStatus::Running {
             endpoint_protocol_generation,
             surface_interest,
@@ -138,18 +110,152 @@ pub(crate) fn prepare_saved_ssh(
         )
         .is_none() =>
         {
-            Ok(prepared.remote_herdr.machine_metadata().or_else(|| {
-                discover_remote_api_metadata(&ssh, session_name)
-                    .inspect_err(
-                        |error| tracing::debug!(%error, "could not capture SSH setup metadata"),
-                    )
-                    .ok()
-            }))
+            Ok(())
         }
-        _ => Err(io::Error::other(
-            "remote server is not ready for saved machines",
-        )),
+        _ => Err(io::Error::other(format!(
+            "remote Herdr server is stopped or incompatible; run `{}`",
+            super::saved_ssh_bootstrap_command(target, session),
+        ))),
     }
+}
+
+pub(crate) struct SavedSshSetup {
+    ssh: RemoteSsh,
+    remote_herdr: RemoteHerdr,
+    candidates: Vec<RemoteHerdr>,
+}
+
+impl SavedSshSetup {
+    pub(crate) fn connect(target: &str) -> io::Result<Self> {
+        super::validate_remote_target(target)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        let manage = crate::config::Config::load()
+            .config
+            .remote
+            .manage_ssh_config;
+        let ssh = RemoteSsh::new(
+            target.to_owned(),
+            manage,
+            crate::session::DEFAULT_SESSION_NAME.to_owned(),
+        );
+        let remote_herdr = RemoteHerdr::for_platform(detect_remote_platform(&ssh)?);
+        let candidates = remote_binary_candidates(&ssh, &remote_herdr)?;
+        Ok(Self {
+            ssh,
+            remote_herdr,
+            candidates,
+        })
+    }
+
+    pub(crate) fn running_sessions(&self) -> io::Result<Vec<String>> {
+        // A fresh host must still reach the normal installation approval.
+        if self.candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut failure = String::new();
+        for candidate in &self.candidates {
+            let output = self.ssh.shell_output(
+                &candidate.platform,
+                &candidate.executable.command(&["session", "list", "--json"]),
+            )?;
+            if output.status.code() == Some(255) {
+                return Err(command_failed("remote SSH connection failed", &output));
+            }
+            if !output.status.success() {
+                failure = command_failed("remote session query failed", &output).to_string();
+                continue;
+            }
+            match serde_json::from_slice::<RemoteSessionListJson>(&output.stdout) {
+                Ok(list) => {
+                    return Ok(list
+                        .sessions
+                        .into_iter()
+                        .filter(|session| {
+                            session.running && crate::session::validate_name(&session.name).is_ok()
+                        })
+                        .map(|session| session.name)
+                        .collect())
+                }
+                Err(error) => failure = format!("invalid remote session list: {error}"),
+            }
+        }
+        Err(io::Error::other(format!(
+            "could not discover remote Herdr sessions: {failure}; specify --remote-session to continue"
+        )))
+    }
+
+    pub(crate) fn prepare(
+        mut self,
+        session_name: &str,
+    ) -> io::Result<Option<crate::client::endpoint::SshMachineMetadata>> {
+        crate::session::validate_name(session_name)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        self.ssh.session_name = session_name.to_owned();
+        let Self {
+            ssh,
+            remote_herdr,
+            candidates,
+        } = self;
+        let prepared =
+            prepare_discovered_remote_herdr(&ssh, remote_herdr, &candidates, false, true)?;
+        ensure_remote_server_ready(
+            &ssh,
+            &prepared.remote_herdr,
+            prepared.stop_after_install_approved,
+            false,
+            true,
+        )?;
+
+        // The bridge already owns daemon startup. EOF closes only this temporary attachment,
+        // leaving the named server running even when no local TUI is open yet.
+        let command = prepared
+            .remote_herdr
+            .executable
+            .saved_bridge_command(session_name);
+        let output = ssh.shell_output(&prepared.remote_herdr.platform, &command)?;
+        if !output.status.success() {
+            return Err(command_failed("remote server startup failed", &output));
+        }
+        match remote_server_status(&ssh, &prepared.remote_herdr, true)? {
+            RemoteServerStatus::Running {
+                endpoint_protocol_generation,
+                surface_interest,
+                health_check,
+                detached_server_daemon,
+                ..
+            } if remote_server_restart_reason(
+                endpoint_protocol_generation,
+                detached_server_daemon,
+                true,
+                surface_interest,
+                health_check,
+            )
+            .is_none() =>
+            {
+                Ok(prepared.remote_herdr.machine_metadata().or_else(|| {
+                    discover_remote_api_metadata(&ssh, session_name)
+                        .inspect_err(
+                            |error| tracing::debug!(%error, "could not capture SSH setup metadata"),
+                        )
+                        .ok()
+                }))
+            }
+            _ => Err(io::Error::other(
+                "remote server is not ready for saved machines",
+            )),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RemoteSessionListJson {
+    sessions: Vec<RemoteSessionJson>,
+}
+
+#[derive(Deserialize)]
+struct RemoteSessionJson {
+    name: String,
+    running: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -554,17 +660,92 @@ pub(super) struct PreparedRemoteHerdr {
 pub(super) struct ManagedSshOptions {
     config_path: PathBuf,
     control_path: Option<PathBuf>,
+    // Bridge workers may launch SSH after the helper that created this config
+    // has gone away. The last options owner removes only the temporary config.
+    _directory: Arc<ManagedSshConfigDirectory>,
 }
 
 struct ManagedSshConfig {
     options: ManagedSshOptions,
 }
 
-impl Drop for ManagedSshConfig {
+struct ManagedSshConfigDirectory(PathBuf);
+
+impl Drop for ManagedSshConfigDirectory {
     fn drop(&mut self) {
-        if let Some(dir) = self.options.config_path.parent() {
-            let _ = fs::remove_dir_all(dir);
-        }
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Classify only SSH authentication diagnostics, not transport failures or
+/// unknown/changed host keys. This does not imply permission to prompt.
+pub(crate) fn ssh_error_requires_authentication(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    if message.contains("host key verification failed")
+        || message.contains("remote host identification has changed")
+    {
+        return false;
+    }
+    (message.contains("permission denied")
+        && ["(publickey", "(keyboard-interactive", "(password"]
+            .iter()
+            .any(|method| message.contains(method)))
+        || (message.contains("signing failed")
+            && (message.contains("sign_and_send_pubkey") || message.contains("agent")))
+}
+
+/// Keep this owner alive until the child has exited: OpenSSH reads its temporary
+/// config after spawn. Dropping it never stops the shared authenticated master.
+pub(crate) struct SshAuthenticationCommand {
+    pub(crate) command: Command,
+    _config: ManagedSshConfig,
+}
+
+pub(crate) fn ssh_authentication_command(target: &str) -> io::Result<SshAuthenticationCommand> {
+    if target.is_empty() || target.starts_with('-') || target.chars().any(char::is_control) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid SSH target",
+        ));
+    }
+    if !crate::platform::remote_ssh_config_paths().multiplexing {
+        return Err(io::Error::new(io::ErrorKind::Unsupported, "interactive SSH recovery requires Unix OpenSSH multiplexing; authenticate outside Herdr on this platform"));
+    }
+    if !crate::config::Config::load()
+        .config
+        .remote
+        .manage_ssh_config
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "interactive SSH recovery requires remote.manage_ssh_config=true",
+        ));
+    }
+    let config = write_managed_ssh_config(target)?;
+    Ok(authentication_command_with_config(target, config))
+}
+
+fn authentication_command_with_config(
+    target: &str,
+    config: ManagedSshConfig,
+) -> SshAuthenticationCommand {
+    let mut command = Command::new("ssh");
+    apply_managed_ssh_options(&mut command, Some(&config.options));
+    command
+        .env("SSH_ASKPASS_REQUIRE", "never")
+        .env_remove("SSH_ASKPASS")
+        .arg("-o")
+        .arg("BatchMode=no")
+        .arg("-o")
+        .arg("StrictHostKeyChecking=yes")
+        .arg("-o")
+        .arg("NumberOfPasswordPrompts=3")
+        .arg("-T")
+        .arg(target)
+        .arg("exit");
+    SshAuthenticationCommand {
+        command,
+        _config: config,
     }
 }
 
@@ -578,7 +759,7 @@ pub(super) struct RemoteSsh {
 impl RemoteSsh {
     fn new(target: String, manage_ssh_config: bool, session_name: String) -> Self {
         let managed_config = if manage_ssh_config {
-            write_managed_ssh_config()
+            write_managed_ssh_config(&target)
                 .inspect_err(|err| {
                     tracing::debug!(%err, "could not write managed ssh config; using plain ssh");
                 })
@@ -596,12 +777,14 @@ impl RemoteSsh {
     }
 
     pub(super) fn new_noninteractive(target: String) -> Self {
-        Self {
-            target,
-            session_name: crate::session::DEFAULT_SESSION_NAME.into(),
-            managed_config: None,
-            noninteractive: true,
-        }
+        let manage = crate::platform::remote_ssh_config_paths().multiplexing
+            && crate::config::Config::load()
+                .config
+                .remote
+                .manage_ssh_config;
+        let mut ssh = Self::new(target, manage, crate::session::DEFAULT_SESSION_NAME.into());
+        ssh.noninteractive = true;
+        ssh
     }
 
     fn target(&self) -> &str {
@@ -1001,31 +1184,6 @@ fn decode_windows_remote_path(encoded: &str) -> io::Result<String> {
     Ok(path)
 }
 
-impl Drop for RemoteSsh {
-    fn drop(&mut self) {
-        let Some(_options) = self
-            .managed_config
-            .as_ref()
-            .map(|config| &config.options)
-            .filter(|options| options.control_path.is_some())
-        else {
-            return;
-        };
-
-        let _ = self
-            .base_command()
-            .arg("-O")
-            .arg("exit")
-            .arg("-o")
-            .arg("BatchMode=yes")
-            .arg(&self.target)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-}
-
 fn apply_noninteractive_ssh_options(command: &mut Command) {
     command
         .arg("-o")
@@ -1045,23 +1203,29 @@ fn apply_noninteractive_ssh_options(command: &mut Command) {
 }
 
 fn apply_managed_ssh_options(command: &mut Command, options: Option<&ManagedSshOptions>) {
+    // Compress the first connection too: multiplexed bridges inherit the master's transport.
+    command.arg("-C");
     let Some(options) = options else {
         return;
     };
 
     command.arg("-F").arg(&options.config_path);
     if let Some(control_path) = &options.control_path {
+        // User ControlPaths may be shared across isolated Herdr configs (or
+        // explicitly disabled). Managed auth must use our scoped transport;
+        // never stop or unlink a master belonging to the user's SSH setup.
         command
             .arg("-S")
             .arg(control_path)
             .arg("-o")
             .arg("ControlMaster=auto")
             .arg("-o")
-            .arg("ControlPersist=yes");
+            .arg("ControlPersist=600");
     }
 }
 
 fn apply_managed_scp_options(command: &mut Command, options: Option<&ManagedSshOptions>) {
+    command.arg("-C");
     let Some(options) = options else {
         return;
     };
@@ -1077,7 +1241,7 @@ fn apply_managed_scp_options(command: &mut Command, options: Option<&ManagedSshO
             .arg("-o")
             .arg("ControlMaster=auto")
             .arg("-o")
-            .arg("ControlPersist=yes");
+            .arg("ControlPersist=600");
     }
 }
 
@@ -1110,19 +1274,36 @@ pub(super) fn prepare_remote_herdr(
 ) -> io::Result<PreparedRemoteHerdr> {
     let platform = detect_remote_platform(ssh)?;
     let remote_herdr = RemoteHerdr::for_platform(platform);
+    let candidates = remote_binary_candidates(ssh, &remote_herdr)?;
+    prepare_discovered_remote_herdr(
+        ssh,
+        remote_herdr,
+        &candidates,
+        live_handoff_enabled,
+        require_surface_interest,
+    )
+}
+
+fn prepare_discovered_remote_herdr(
+    ssh: &RemoteSsh,
+    remote_herdr: RemoteHerdr,
+    candidates: &[RemoteHerdr],
+    live_handoff_enabled: bool,
+    require_surface_interest: bool,
+) -> io::Result<PreparedRemoteHerdr> {
     if remote_herdr.platform.is_windows() {
         return prepare_windows_remote_herdr(
             ssh,
             remote_herdr,
+            candidates,
             live_handoff_enabled,
             require_surface_interest,
         );
     }
     let override_binary = remote_binary_override_path()?;
-    let remote_binary_candidates = remote_binary_candidates(ssh, &remote_herdr)?;
 
     if override_binary.is_none() {
-        for candidate in &remote_binary_candidates {
+        for candidate in candidates {
             if remote_binary_supports_endpoint_requirement(ssh, candidate, require_surface_interest)
                 .unwrap_or(false)
             {
@@ -1145,7 +1326,7 @@ pub(super) fn prepare_remote_herdr(
     }
 
     let mut stop_after_install_approved = false;
-    if let Some(status_probe_herdr) = remote_binary_candidates.first().or_else(|| {
+    if let Some(status_probe_herdr) = candidates.first().or_else(|| {
         remote_binary_exists(ssh, &remote_herdr)
             .ok()
             .and_then(|exists| exists.then_some(&remote_herdr))
@@ -1208,14 +1389,14 @@ pub(super) fn find_installed_remote_herdr(ssh: &RemoteSsh) -> io::Result<RemoteH
 fn prepare_windows_remote_herdr(
     ssh: &RemoteSsh,
     remote_herdr: RemoteHerdr,
+    candidates: &[RemoteHerdr],
     live_handoff_enabled: bool,
     require_surface_interest: bool,
 ) -> io::Result<PreparedRemoteHerdr> {
     let override_package = remote_binary_override_path()?;
     let custom_package = override_package.is_some();
-    let candidates = remote_binary_candidates(ssh, &remote_herdr)?;
     if !custom_package {
-        for candidate in &candidates {
+        for candidate in candidates {
             if remote_binary_supports_endpoint_requirement(
                 ssh,
                 candidate,
@@ -1433,7 +1614,7 @@ fn remote_binary_candidates(
 
 fn windows_remote_binary_candidate_command() -> String {
     windows_powershell_script_command(&format!(
-        r#"function Emit-HerdrPath([string]$CandidatePath) {{ if ([string]::IsNullOrWhiteSpace($CandidatePath) -or -not (Test-Path -LiteralPath $CandidatePath -PathType Leaf)) {{ return }}; $candidateFullPath = [System.IO.Path]::GetFullPath($CandidatePath); $encodedCandidate = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($candidateFullPath)); [Console]::Out.WriteLine('{WINDOWS_REMOTE_PATH_MARKER}' + $encodedCandidate) }}; $pathCommand = Get-Command herdr.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; if ($null -ne $pathCommand) {{ Emit-HerdrPath $pathCommand.Source }}; $herdrHome = if ([string]::IsNullOrWhiteSpace($env:HERDR_HOME)) {{ Join-Path $env:USERPROFILE '.herdr' }} else {{ $env:HERDR_HOME }}; $activeJunction = Get-Item -LiteralPath (Join-Path $herdrHome 'packages\standalone\current') -Force -ErrorAction SilentlyContinue; if ($null -ne $activeJunction -and -not [string]::IsNullOrWhiteSpace([string]$activeJunction.Target)) {{ Emit-HerdrPath (Join-Path ([string]$activeJunction.Target) 'herdr.exe') }}; exit 0"#
+        r#"function Emit-HerdrPath([string]$CandidatePath) {{ if ([string]::IsNullOrWhiteSpace($CandidatePath) -or -not (Test-Path -LiteralPath $CandidatePath -PathType Leaf)) {{ return }}; $candidateFullPath = [System.IO.Path]::GetFullPath($CandidatePath); $encodedCandidate = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($candidateFullPath)); [Console]::Out.WriteLine('{WINDOWS_REMOTE_PATH_MARKER}' + $encodedCandidate) }}; $pathCommand = Get-Command herdr.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; if ($null -ne $pathCommand) {{ Emit-HerdrPath $pathCommand.Source }}; $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; Get-CimInstance Win32_Process -Filter "Name = 'herdr.exe' OR Name = 'herdr-dev.exe'" -ErrorAction SilentlyContinue | ForEach-Object {{ $owner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction SilentlyContinue; if ($owner.ReturnValue -eq 0 -and $owner.Sid -eq $userSid) {{ Emit-HerdrPath $_.ExecutablePath }} }}; $herdrHome = if ([string]::IsNullOrWhiteSpace($env:HERDR_HOME)) {{ Join-Path $env:USERPROFILE '.herdr' }} else {{ $env:HERDR_HOME }}; $activeJunction = Get-Item -LiteralPath (Join-Path $herdrHome 'packages\standalone\current') -Force -ErrorAction SilentlyContinue; if ($null -ne $activeJunction -and -not [string]::IsNullOrWhiteSpace([string]$activeJunction.Target)) {{ Emit-HerdrPath (Join-Path ([string]$activeJunction.Target) 'herdr.exe') }}; exit 0"#
     ))
 }
 
@@ -1944,7 +2125,7 @@ fn probe_remote_endpoint(
         remote_herdr.clone(),
         path.clone(),
         ssh.session_name.clone(),
-        None,
+        ssh.options(),
         true,
     )?;
     let mut stream = crate::ipc::connect_local_stream(&path)?;
@@ -2720,14 +2901,19 @@ fn ssh_user_config_include(path: Option<&Path>) -> Option<String> {
 
 /// Builds a temporary ssh config that includes the user's settings first, so
 /// OpenSSH's first-value-wins behavior preserves explicit user keepalives.
-fn write_managed_ssh_config() -> io::Result<ManagedSshConfig> {
+fn write_managed_ssh_config(target: &str) -> io::Result<ManagedSshConfig> {
     let paths = crate::platform::remote_ssh_config_paths();
+    let control_path = if paths.multiplexing {
+        Some(crate::platform::shared_ssh_control_path(
+            &crate::config::config_path(),
+            target,
+        )?)
+    } else {
+        None
+    };
+
     let dir = crate::platform::create_remote_ssh_config_dir(SSH_CONTROL_SOCKET_NAME)?;
     let path = dir.join("config");
-    let control_path = paths
-        .multiplexing
-        .then(|| dir.join(SSH_CONTROL_SOCKET_NAME));
-
     let mut contents = String::new();
     if let Some(include) = ssh_user_config_include(paths.user_config.as_deref()) {
         contents.push_str(&format!("Include {include}\n"));
@@ -2754,6 +2940,7 @@ fn write_managed_ssh_config() -> io::Result<ManagedSshConfig> {
         options: ManagedSshOptions {
             config_path: path,
             control_path,
+            _directory: Arc::new(ManagedSshConfigDirectory(dir)),
         },
     })
 }
@@ -3528,7 +3715,7 @@ mod tests {
     fn managed_ssh_config_includes_user_config_then_fallback() {
         use std::os::unix::fs::PermissionsExt;
 
-        let managed_config = write_managed_ssh_config().expect("write managed config");
+        let managed_config = write_managed_ssh_config("example").expect("write managed config");
         let path = managed_config.options.config_path.clone();
         let control_path = managed_config
             .options
@@ -3588,6 +3775,106 @@ mod tests {
         drop(managed_config);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn shared_ssh_transport_survives_helper_config_drop() {
+        let first = write_managed_ssh_config("example").unwrap();
+        let second = write_managed_ssh_config("example").unwrap();
+        let socket = first.options.control_path.clone().unwrap();
+        assert_eq!(Some(&socket), second.options.control_path.as_ref());
+        assert_ne!(socket.parent(), first.options.config_path.parent());
+        let config_path = first.options.config_path.clone();
+        drop(first);
+        assert!(!config_path.exists());
+        assert!(socket.parent().unwrap().is_dir());
+    }
+
+    #[test]
+    fn ssh_authentication_diagnostics_are_narrow() {
+        for message in [
+            "user@host: Permission denied (publickey).",
+            "Permission denied (keyboard-interactive,password).",
+            "Permission denied (password).",
+            "sign_and_send_pubkey: signing failed for ED25519 from agent: agent refused operation",
+        ] {
+            assert!(ssh_error_requires_authentication(message), "{message}");
+        }
+        for message in [
+            "Host key verification failed.",
+            "REMOTE HOST IDENTIFICATION HAS CHANGED!",
+            "Permission denied opening /tmp/file",
+            "Connection refused",
+            "agent disconnected",
+            "Permission denied (publickey). Host key verification failed.",
+        ] {
+            assert!(!ssh_error_requires_authentication(message), "{message}");
+        }
+    }
+
+    #[test]
+    fn bridge_options_keep_temporary_config_alive_after_helper_drop() {
+        let config = write_managed_ssh_config("example").unwrap();
+        let path = config.options.config_path.clone();
+        let worker_options = config.options.clone();
+        drop(config);
+        assert!(path.is_file());
+        drop(worker_options);
+        assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn authentication_command_uses_shared_transport_without_askpass_or_host_key_relaxation() {
+        let config = write_managed_ssh_config("example").unwrap();
+        let setup = RemoteSsh::new("example".into(), true, "other-session".into());
+        assert_eq!(
+            config.options.control_path,
+            setup.options().unwrap().control_path
+        );
+        let authentication = authentication_command_with_config("example", config);
+        let command = &authentication.command;
+        assert_eq!(command.get_program(), "ssh");
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy())
+            .collect::<Vec<_>>();
+        for required in [
+            "ControlMaster=auto",
+            "ControlPersist=600",
+            "BatchMode=no",
+            "StrictHostKeyChecking=yes",
+        ] {
+            assert!(args.iter().any(|arg| arg == required), "missing {required}");
+        }
+        assert_eq!(&args[args.len() - 3..], &["-T", "example", "exit"]);
+        let env = command.get_envs().collect::<Vec<_>>();
+        assert!(env.iter().any(
+            |(key, value)| *key == std::ffi::OsStr::new("SSH_ASKPASS_REQUIRE")
+                && *value == Some(std::ffi::OsStr::new("never"))
+        ));
+        assert!(env
+            .iter()
+            .any(|(key, value)| *key == std::ffi::OsStr::new("SSH_ASKPASS") && value.is_none()));
+    }
+
+    #[test]
+    fn authentication_command_rejects_option_injection() {
+        assert_eq!(
+            ssh_authentication_command("-oProxyCommand=bad")
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn unmanaged_ssh_setup_preserves_plain_transport() {
+        let ssh = RemoteSsh::new("example".into(), false, "main".into());
+        assert!(ssh.options().is_none());
+        assert!(!ssh.command().get_args().any(|arg| arg == "-F"));
+    }
+
     #[test]
     fn ssh_config_quote_wraps_path_with_spaces() {
         assert_eq!(
@@ -3599,14 +3886,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn remote_ssh_command_uses_managed_config_when_present() {
-        let mut managed_config = write_managed_ssh_config().expect("write managed config");
-        managed_config.options.control_path = Some(PathBuf::from("/tmp/herdr test/control"));
+        let managed_config = write_managed_ssh_config("example").expect("write managed config");
         let config_path = managed_config.options.config_path.clone();
-        let control_path = managed_config
-            .options
-            .control_path
-            .clone()
-            .expect("Unix managed config has a control path");
+        let control_path = managed_config.options.control_path.clone().unwrap();
         let ssh = RemoteSsh {
             target: "example".to_string(),
             session_name: crate::session::DEFAULT_SESSION_NAME.into(),
@@ -3623,6 +3905,7 @@ mod tests {
         assert_eq!(
             args,
             vec![
+                "-C".to_string(),
                 "-F".to_string(),
                 config_path.to_string_lossy().into_owned(),
                 "-S".to_string(),
@@ -3630,7 +3913,7 @@ mod tests {
                 "-o".to_string(),
                 "ControlMaster=auto".to_string(),
                 "-o".to_string(),
-                "ControlPersist=yes".to_string(),
+                "ControlPersist=600".to_string(),
                 "-T".to_string(),
                 "example".to_string(),
             ]
@@ -3644,6 +3927,7 @@ mod tests {
         assert_eq!(
             scp_args,
             vec![
+                "-C".to_string(),
                 "-F".to_string(),
                 config_path.to_string_lossy().into_owned(),
                 "-o".to_string(),
@@ -3651,7 +3935,7 @@ mod tests {
                 "-o".to_string(),
                 "ControlMaster=auto".to_string(),
                 "-o".to_string(),
-                "ControlPersist=yes".to_string(),
+                "ControlPersist=600".to_string(),
             ]
         );
     }
@@ -3659,7 +3943,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_managed_ssh_config_uses_keepalives_without_control_socket() {
-        let managed_config = write_managed_ssh_config().expect("write managed config");
+        let managed_config = write_managed_ssh_config("example").expect("write managed config");
         let config_path = managed_config.options.config_path.clone();
         assert!(managed_config.options.control_path.is_none());
         let contents = std::fs::read_to_string(&config_path).expect("read managed config");
@@ -3690,6 +3974,7 @@ mod tests {
         assert_eq!(
             args,
             vec![
+                "-C".to_string(),
                 "-F".to_string(),
                 config_path.to_string_lossy().into_owned(),
                 "-T".to_string(),
@@ -3703,7 +3988,11 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             scp_args,
-            vec!["-F".to_string(), config_path.to_string_lossy().into_owned(),]
+            vec![
+                "-C".to_string(),
+                "-F".to_string(),
+                config_path.to_string_lossy().into_owned(),
+            ]
         );
     }
 
@@ -3731,6 +4020,44 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn endpoint_probe_preserves_setup_ssh_options() {
+        let managed_config = write_managed_ssh_config("example").expect("write managed config");
+        let marker = managed_config
+            .options
+            .config_path
+            .with_file_name("probe-ran");
+        fs::write(
+            &managed_config.options.config_path,
+            format!(
+                "Host *\n  ProxyCommand /bin/sh -c {}\n",
+                shell_quote(&format!(
+                    ": > {}; exit 1",
+                    shell_quote(&marker.to_string_lossy())
+                ))
+            ),
+        )
+        .expect("write isolated probe config");
+        let ssh = RemoteSsh {
+            target: "herdr-probe.invalid".into(),
+            session_name: "probe-options".into(),
+            managed_config: Some(managed_config),
+            noninteractive: false,
+        };
+        let remote = RemoteHerdr::for_platform(RemotePlatform {
+            os: "linux",
+            arch: "x86_64",
+        });
+
+        let error = probe_remote_endpoint(&ssh, &remote).expect_err("proxy refuses connection");
+
+        assert!(
+            marker.exists(),
+            "endpoint probe discarded the authenticated setup's SSH options: {error}"
+        );
+    }
+
     #[test]
     fn noninteractive_ssh_stderr_capture_is_bounded() {
         let stderr = vec![b'x'; NONINTERACTIVE_SSH_STDERR_LIMIT + 4096];
@@ -3747,6 +4074,7 @@ mod tests {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         for required in [
+            "-C",
             "BatchMode=yes",
             "NumberOfPasswordPrompts=0",
             "StrictHostKeyChecking=yes",
@@ -3757,8 +4085,7 @@ mod tests {
         ] {
             assert!(args.iter().any(|arg| arg == required), "missing {required}");
         }
-        assert!(!args.iter().any(|arg| arg == "-F"));
-        assert!(ssh.options().is_none());
+        assert_eq!(args.iter().any(|arg| arg == "-F"), ssh.options().is_some());
     }
 
     #[test]
@@ -3842,7 +4169,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_ssh_command_is_plain_without_managed_config() {
+    fn remote_ssh_commands_compress_without_managed_config() {
         let ssh = RemoteSsh {
             target: "example".to_string(),
             session_name: crate::session::DEFAULT_SESSION_NAME.into(),
@@ -3856,8 +4183,8 @@ mod tests {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
 
-        assert_eq!(args, vec!["-T".to_string(), "example".to_string()]);
-        assert!(ssh.scp_command().get_args().next().is_none());
+        assert_eq!(args, vec!["-C", "-T", "example"]);
+        assert_eq!(ssh.scp_command().get_args().collect::<Vec<_>>(), vec!["-C"]);
     }
 
     #[test]
@@ -4375,6 +4702,55 @@ mod tests {
         let command = decode_windows_command(&windows_remote_binary_candidate_command());
         assert!(command.contains("Get-Command herdr.exe"));
         assert!(command.contains("$activeJunction.Target"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_process_candidates_require_a_verified_current_user_owner() {
+        // Supply ownership results without needing another Windows account.
+        // Execute the real discovery script, including its path validation.
+        let fixture = r#"
+function Get-Command {}
+function Get-Item {}
+function Get-CimInstance {
+    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    [pscustomobject]@{ ExecutablePath=$env:HERDR_TEST_EXE; OwnerSid=$sid; OwnerResult=0 }
+    [pscustomobject]@{ ExecutablePath="$env:SystemRoot\System32\cmd.exe"; OwnerSid='S-1-0-0'; OwnerResult=0 }
+    [pscustomobject]@{ ExecutablePath="$PSHOME\powershell.exe"; OwnerSid=$sid; OwnerResult=2 }
+}
+function Invoke-CimMethod {
+    param($InputObject)
+    [pscustomobject]@{ ReturnValue=$InputObject.OwnerResult; Sid=$InputObject.OwnerSid }
+}
+function Get-Process {
+    Get-CimInstance | ForEach-Object { [pscustomobject]@{ Path=$_.ExecutablePath } }
+}
+"#;
+        let executable = std::env::current_exe().unwrap();
+        let script = format!(
+            "{fixture}\n{}",
+            decode_windows_command(&windows_remote_binary_candidate_command())
+        );
+        let encoded = windows_powershell_script_command(&script);
+        let mut command = Command::new("powershell.exe");
+        command
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+            .arg(encoded.split_whitespace().last().unwrap())
+            .env("HERDR_TEST_EXE", &executable);
+        crate::platform::configure_background_command(&mut command);
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let paths = String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.strip_prefix(WINDOWS_REMOTE_PATH_MARKER))
+            .map(|path| decode_windows_remote_path(path).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, [executable.to_string_lossy().into_owned()]);
     }
 
     #[test]

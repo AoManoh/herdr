@@ -16,6 +16,8 @@ use crate::config::UiLanguage;
 use crate::popup_size::PopupSize;
 
 const PLUGIN_BUILD_OUTPUT_MAX_BYTES: usize = 64 * 1024;
+const PLUGIN_INSTALL_USAGE: &str =
+    "usage: herdr plugin install [--ref REF] [--yes|-y] <owner>/<repo>[/subdir...]";
 
 pub(super) fn run_plugin_command(args: &[String]) -> std::io::Result<i32> {
     let language = crate::config::Config::load().config.ui.language;
@@ -153,47 +155,59 @@ fn plugin_unlink(args: &[String], language: UiLanguage) -> std::io::Result<i32> 
     }))
 }
 
-fn plugin_install(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
-    let text = crate::i18n::plugin_cli_text(language);
-    let Some(source_arg) = args.first() else {
-        print_usage(
-            language,
-            "herdr plugin install <owner>/<repo>[/subdir...] [--ref REF] [--yes]",
-        );
-        return Ok(2);
-    };
-    let source = match GithubPluginSource::parse(source_arg) {
-        Ok(source) => source,
-        Err(err) => {
-            if let Some(usage) = err.strip_prefix("usage: ") {
-                print_usage(language, usage);
-            } else {
-                eprintln!("{err}");
-            }
-            return Ok(2);
-        }
-    };
+#[derive(Debug)]
+struct PluginInstallArgs {
+    source: GithubPluginSource,
+    requested_ref: Option<String>,
+    yes: bool,
+}
+
+fn parse_plugin_install_args(args: &[String]) -> Result<PluginInstallArgs, String> {
+    let mut source_arg = None;
     let mut requested_ref = None;
     let mut yes = false;
-    let mut index = 1;
+    let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
             "--ref" => {
-                let Some(value) = required_value(args, &mut index, language, "--ref") else {
-                    return Ok(2);
-                };
-                requested_ref = Some(value);
+                let value = args.get(index + 1).ok_or("missing value for --ref")?;
+                requested_ref = Some(value.clone());
+                index += 2;
             }
             "--yes" | "-y" => {
                 yes = true;
                 index += 1;
             }
+            other if other.starts_with('-') || source_arg.is_some() => {
+                return Err(format!("unknown option: {other}"));
+            }
             other => {
-                print_unknown_option(language, other);
-                return Ok(2);
+                source_arg = Some(other);
+                index += 1;
             }
         }
     }
+    let source = GithubPluginSource::parse(source_arg.ok_or(PLUGIN_INSTALL_USAGE)?)?;
+    Ok(PluginInstallArgs {
+        source,
+        requested_ref,
+        yes,
+    })
+}
+
+fn plugin_install(args: &[String], language: UiLanguage) -> std::io::Result<i32> {
+    let text = crate::i18n::plugin_cli_text(language);
+    let PluginInstallArgs {
+        source,
+        requested_ref,
+        yes,
+    } = match parse_plugin_install_args(args) {
+        Ok(args) => args,
+        Err(err) => {
+            print_plugin_install_error(language, &err);
+            return Ok(2);
+        }
+    };
 
     if !yes && !io::stdin().is_terminal() {
         eprintln!("{}", text.noninteractive_install);
@@ -699,6 +713,21 @@ fn plugin_pane_close(args: &[String], language: UiLanguage) -> std::io::Result<i
     }))
 }
 
+fn print_plugin_install_error(language: UiLanguage, err: &str) {
+    if let Some(usage) = err.strip_prefix("usage: ") {
+        print_usage(language, usage);
+    } else if let Some(flag) = err.strip_prefix("missing value for ") {
+        eprintln!(
+            "{}{flag}",
+            crate::i18n::plugin_cli_text(language).missing_value
+        );
+    } else if let Some(option) = err.strip_prefix("unknown option: ") {
+        print_unknown_option(language, option);
+    } else {
+        eprintln!("{err}");
+    }
+}
+
 fn print_usage(language: UiLanguage, usage: &str) {
     eprintln!("{}{usage}", crate::i18n::plugin_cli_text(language).usage);
 }
@@ -795,7 +824,7 @@ impl GithubPluginSource {
         }
         let parts = value.split('/').collect::<Vec<_>>();
         if parts.len() < 2 {
-            return Err("usage: herdr plugin install <owner>/<repo>[/subdir...]".into());
+            return Err(PLUGIN_INSTALL_USAGE.into());
         }
         let owner = parts[0];
         let repo = parts[1];
@@ -1845,6 +1874,68 @@ mod tests {
                 installed_unix_ms: Some(42),
             },
             warnings: vec![],
+        }
+    }
+
+    #[test]
+    fn plugin_install_args_accept_options_around_source() {
+        for (args, expected_ref, expected_yes) in [
+            (vec!["owner/repo"], None, false),
+            (vec!["--yes", "owner/repo"], None, true),
+            (vec!["-y", "owner/repo"], None, true),
+            (
+                vec!["owner/repo", "--ref", "main", "-y"],
+                Some("main"),
+                true,
+            ),
+            (
+                vec!["--ref", "main", "owner/repo", "--yes"],
+                Some("main"),
+                true,
+            ),
+            (
+                vec![
+                    "--yes",
+                    "--ref",
+                    "old",
+                    "owner/repo",
+                    "--ref",
+                    "main",
+                    "--yes",
+                ],
+                Some("main"),
+                true,
+            ),
+            // Preserve ref-value consumption: a value named --yes is not consent.
+            (vec!["owner/repo", "--ref", "--yes"], Some("--yes"), false),
+        ] {
+            let args = args.into_iter().map(String::from).collect::<Vec<_>>();
+            let parsed = parse_plugin_install_args(&args).unwrap();
+            assert_eq!(parsed.source.display(), "owner/repo", "{args:?}");
+            assert_eq!(parsed.requested_ref.as_deref(), expected_ref, "{args:?}");
+            assert_eq!(parsed.yes, expected_yes, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn plugin_install_args_reject_invalid_syntax() {
+        for (args, expected_error) in [
+            (vec![], PLUGIN_INSTALL_USAGE),
+            (vec!["--yes"], PLUGIN_INSTALL_USAGE),
+            (vec!["owner/repo", "--ref"], "missing value for --ref"),
+            (vec!["--unknown", "owner/repo"], "unknown option: --unknown"),
+            (
+                vec!["owner/repo", "extra/repo"],
+                "unknown option: extra/repo",
+            ),
+            (vec!["owner"], PLUGIN_INSTALL_USAGE),
+        ] {
+            let args = args.into_iter().map(String::from).collect::<Vec<_>>();
+            assert_eq!(
+                parse_plugin_install_args(&args).unwrap_err(),
+                expected_error,
+                "{args:?}"
+            );
         }
     }
 
