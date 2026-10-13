@@ -47,8 +47,9 @@ fn plugin_help_and_errors_follow_zh_cn_config() {
     assert_eq!(usage.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&usage.stderr);
     assert!(
-        stderr
-            .contains("用法：herdr plugin install <owner>/<repo>[/subdir...] [--ref REF] [--yes]"),
+        stderr.contains(
+            "用法：herdr plugin install [--ref REF] [--yes|-y] <owner>/<repo>[/subdir...]"
+        ),
         "{stderr}"
     );
 
