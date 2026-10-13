@@ -144,6 +144,27 @@ herdr update
 
 该命令仍指向 herdr 官方更新渠道，可能将中文维护版覆盖为官方版本。
 
+## 版本发布与升级说明
+
+中文维护版的代码分支和 GitHub Release 是两回事。推送代码或创建 `zh-v...` 标签后，GitHub Actions 还需要完成跨平台构建并上传 Release 资产；构建完成前，安装器不能下载这个版本。
+
+- `releases/latest/download/...` 只指向最近一个已经发布完成的 Release，不指向最新 commit，也不指向刚推送的标签。
+- 指定 `HERDR_VERSION` 时，标签必须已经有 `checksums.txt` 和对应平台的二进制文件。返回 404 通常表示 Release 还没有发布完成；检查 [Chinese Fork Release](https://github.com/AoManoh/herdr/actions/workflows/zh-release.yml) 的运行状态。
+- 发布完成后，升级最新版本：
+
+  ```bash
+  curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh | sh
+  ```
+
+- 固定安装某个版本：
+
+  ```bash
+  curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh \
+    | HERDR_VERSION=zh-v0.9.1.1 sh
+  ```
+
+  `HERDR_VERSION=...` 必须放在执行安装器的 `sh` 前面。不要把安装器的输出再通过管道交给另一个 `sh`，例如不要写成 `curl ... | sh | HERDR_VERSION=... sh`。
+
 ## 从源码构建
 
 普通用户推荐使用 Release 二进制。需要开发或审查源码时：
