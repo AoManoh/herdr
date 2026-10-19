@@ -111,7 +111,7 @@ pub(crate) fn text(language: UiLanguage, english: &'static str) -> &'static str 
         "error" => "错误",
         "Close workspace?" => "关闭工作区？",
         "Close worktree group?" => "关闭工作树分组？",
-        "Close target changed; try closing the tab again" => "关闭目标已变化，请重新关闭该标签页",
+        "Close target changed; try closing it again" => "关闭目标已变化，请重新关闭",
         "workspaces" => "工作区",
         "terminals" => "终端",
         "blocked" => "等待输入",
@@ -393,6 +393,13 @@ pub(crate) struct PluginCliText {
     pub showing_last: &'static str,
     pub earlier_output_omitted: &'static str,
     pub plugin_not_installed: &'static str,
+    pub update_about: &'static str,
+    pub noninteractive_update: &'static str,
+    pub update_cancelled: &'static str,
+    pub update_prompt: &'static str,
+    pub update_preview: &'static str,
+    pub no_github_plugins: &'static str,
+    pub plugin_not_updated: &'static str,
 }
 
 const PLUGIN_CLI_EN: PluginCliText = PluginCliText {
@@ -465,6 +472,13 @@ const PLUGIN_CLI_EN: PluginCliText = PluginCliText {
     showing_last: " showing last ",
     earlier_output_omitted: " bytes; earlier output omitted",
     plugin_not_installed: "Plugin was not installed.",
+    update_about: "Update GitHub-installed plugins",
+    noninteractive_update: "plugin update requires --yes when stdin is not interactive",
+    update_cancelled: "plugin update cancelled",
+    update_prompt: "Update this plugin?",
+    update_preview: "Plugin update preview:",
+    no_github_plugins: "No GitHub-managed plugins installed.",
+    plugin_not_updated: "Plugin was not updated.",
 };
 
 const PLUGIN_CLI_ZH_CN: PluginCliText = PluginCliText {
@@ -537,6 +551,13 @@ const PLUGIN_CLI_ZH_CN: PluginCliText = PluginCliText {
     showing_last: "仅显示最后 ",
     earlier_output_omitted: " 字节；更早的输出已省略",
     plugin_not_installed: "插件未安装。",
+    update_about: "更新从 GitHub 安装的插件",
+    noninteractive_update: "标准输入不是交互式终端时，插件更新需要 --yes",
+    update_cancelled: "已取消插件更新",
+    update_prompt: "更新此插件？",
+    update_preview: "插件更新预览：",
+    no_github_plugins: "没有从 GitHub 安装的插件。",
+    plugin_not_updated: "插件未更新。",
 };
 
 pub(crate) fn plugin_cli_text(language: UiLanguage) -> &'static PluginCliText {
@@ -567,6 +588,34 @@ pub(crate) fn plugin_installed_from(language: UiLanguage, plugin_id: &str, sourc
     match language {
         UiLanguage::En => format!("Installed {plugin_id} from {source}."),
         UiLanguage::ZhCn => format!("已从 {source} 安装 {plugin_id}。"),
+    }
+}
+
+pub(crate) fn plugin_updated_from(language: UiLanguage, plugin_id: &str, source: &str) -> String {
+    match language {
+        UiLanguage::En => format!("Updated {plugin_id} from {source}."),
+        UiLanguage::ZhCn => format!("已从 {source} 更新 {plugin_id}。"),
+    }
+}
+
+pub(crate) fn plugin_up_to_date(language: UiLanguage, plugin_id: &str) -> String {
+    match language {
+        UiLanguage::En => format!("{plugin_id} is already up to date."),
+        UiLanguage::ZhCn => format!("{plugin_id} 已是最新版本。"),
+    }
+}
+
+pub(crate) fn plugin_linked_not_updatable(language: UiLanguage, target: &str) -> String {
+    match language {
+        UiLanguage::En => format!("plugin is locally linked and cannot be updated: {target}"),
+        UiLanguage::ZhCn => format!("插件是本地链接的，无法更新：{target}"),
+    }
+}
+
+pub(crate) fn plugin_update_error(language: UiLanguage, plugin_id: &str, error: &str) -> String {
+    match language {
+        UiLanguage::En => format!("error updating {plugin_id}: {error}"),
+        UiLanguage::ZhCn => format!("更新 {plugin_id} 失败：{error}"),
     }
 }
 
@@ -641,5 +690,32 @@ mod tests {
             "3 终端"
         );
         assert_eq!(keybind_label(UiLanguage::ZhCn, "clear pane"), "清空窗格");
+    }
+
+    #[test]
+    fn resolves_plugin_update_messages() {
+        assert_eq!(
+            plugin_cli_text(UiLanguage::En).update_prompt,
+            "Update this plugin?"
+        );
+        assert_eq!(
+            plugin_cli_text(UiLanguage::ZhCn).update_prompt,
+            "更新此插件？"
+        );
+        assert_eq!(
+            plugin_updated_from(UiLanguage::ZhCn, "example.plugin", "owner/repo"),
+            "已从 owner/repo 更新 example.plugin。"
+        );
+        assert_eq!(
+            plugin_up_to_date(UiLanguage::En, "example.plugin"),
+            "example.plugin is already up to date."
+        );
+        assert_eq!(
+            text(
+                UiLanguage::ZhCn,
+                "Close target changed; try closing it again"
+            ),
+            "关闭目标已变化，请重新关闭"
+        );
     }
 }

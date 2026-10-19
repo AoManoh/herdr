@@ -14,7 +14,7 @@
   <a href="https://github.com/AoManoh/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/AoManoh/herdr?label=中文维护版&labelColor=333333&color=666666" alt="latest Chinese fork release" /></a>
 </p>
 
-> 本仓库是由 AoManoh 维护的 herdr 简体中文版本。当前版本基于上游 [`v0.9.3`](https://github.com/herdrdev/herdr/releases/tag/v0.9.3)，保留上游功能并增加可切换的 English / 简体中文 TUI 与 plugin CLI 汉化。它不是 herdr 官方发布渠道。
+> 本仓库是由 AoManoh 维护的 herdr 简体中文版本。当前版本基于上游 [`v0.9.5`](https://github.com/herdrdev/herdr/releases/tag/v0.9.5)，保留上游功能并增加可切换的 English / 简体中文 TUI 与 plugin CLI 汉化。它不是 herdr 官方发布渠道。
 
 ## 主要差异
 
@@ -52,7 +52,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ```bash
 curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh \
-  | HERDR_VERSION=zh-v0.9.3.1 sh
+  | HERDR_VERSION=zh-v0.9.5.1 sh
 ```
 
 Windows 原生版本暂不通过此 shell 安装器分发；Windows 用户推荐在 WSL 中使用。
@@ -160,7 +160,7 @@ herdr update
 
   ```bash
   curl -fsSL https://github.com/AoManoh/herdr/releases/latest/download/install.sh \
-    | HERDR_VERSION=zh-v0.9.3.1 sh
+    | HERDR_VERSION=zh-v0.9.5.1 sh
   ```
 
   `HERDR_VERSION=...` 必须放在执行安装器的 `sh` 前面。不要把安装器的输出再通过管道交给另一个 `sh`，例如不要写成 `curl ... | sh | HERDR_VERSION=... sh`。
@@ -185,7 +185,7 @@ just check
 
 - `upstream` 指向 `herdrdev/herdr`。
 - fork `master` 包含中文维护改动并定期同步上游。
-- 中文发布标签使用 `zh-v<上游基础版本>.<中文修订号>`，例如 `zh-v0.9.3.1`。
+- 中文发布标签使用 `zh-v<上游基础版本>.<中文修订号>`，例如 `zh-v0.9.5.1`。
 
 ## 上游文档
 
